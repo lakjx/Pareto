@@ -1,0 +1,8 @@
+figures/
+logs/
+*.xlsx
+*.csv
+*.json
+*.pt
+checkpoint/
+data/
