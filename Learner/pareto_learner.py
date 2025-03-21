@@ -175,7 +175,7 @@ class PACCriticNS(nn.Module):
 
 class Pareto_Learner:
     def __init__(self, mac, args, scheme):
-        log_dir = args.log_dir+"/Pareto_RWD1"
+        log_dir = args.log_dir
         self.writer = SummaryWriter(log_dir=log_dir)
         self.args = args
         self.scheme = scheme
@@ -274,6 +274,9 @@ class Pareto_Learner:
             self.writer.add_scalar("advantage_mean_agent1",advantages[:, :, 0].sum().item(), self.critic_training_steps)
             self.writer.add_scalar("advantage_mean_agent2",advantages[:, :, 1].sum().item(), self.critic_training_steps)
             self.writer.add_scalar("advantage_mean_agent3",advantages[:, :, 2].sum().item(), self.critic_training_steps)
+    def expectile_loss(self, diff, expectile):
+        weight = th.where(diff > 0, th.tensor(expectile), th.tensor(1 - expectile))
+        return weight * (diff ** 2)
 
     def train_critic(self, critic, target_critic, batch, rewards, mask):
         actions = batch["actions"]
@@ -305,11 +308,13 @@ class Pareto_Learner:
         q_current = th.gather(q, -1, actions).squeeze(-1)
         td_error = target_returns.detach() - q_current
         mask_td_error = td_error * mask
-        loss = 0.5 * (mask_td_error ** 2).sum() / mask.sum()
+        # loss = 0.5 * (mask_td_error ** 2).sum() / mask.sum()
+        loss = self.expectile_loss(mask_td_error, self.args.expectile).sum() / mask.sum()
 
         td_error_v = target_returns.detach() - v
         mask_td_error_v = td_error_v * mask
-        loss += 0.5 * (mask_td_error_v ** 2).sum() / mask.sum()
+        # loss += 0.5 * (mask_td_error_v ** 2).sum() / mask.sum()
+        loss += self.expectile_loss(mask_td_error_v, self.args.expectile).sum() / mask.sum()
 
         # compute the maximum Q-value and the joint action of the other agents that results in this Q-value
         q_all = critic(batch, compute_all=True)[0][:, :-1]

@@ -34,7 +34,7 @@ def run_train(args):
     # 加载ReplayBuffer
     # buffer = ReplayBuffer(scheme, groups, args.buffer_size, args.episode_limit + 1, preprocess=preprocess, device="cpu")
     if args.load_replay_buffer:
-        buffer = ReplayBuffer.load("replay_buffer_new.pt", scheme, groups, args.episode_limit + 1, preprocess=preprocess,device="cpu")
+        buffer = ReplayBuffer.load("replay_buffer_new819.pt", scheme, groups, args.episode_limit + 1, preprocess=preprocess,device="cpu")
     else :
         buffer = ReplayBuffer(scheme, groups, args.buffer_size, args.episode_limit + 1, preprocess=preprocess,device="cpu")
 
@@ -85,7 +85,7 @@ def run_train(args):
 if __name__ == "__main__":
     # Change working directory to script's directory
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
-
+    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
     ssl._create_default_https_context = ssl._create_unverified_context
     mp.set_start_method('spawn')
     checkpoint_dir = './checkpoint/'

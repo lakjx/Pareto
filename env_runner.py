@@ -36,7 +36,7 @@ class MultiAgentEnv:
         if self.test:
             return np.random.randn(self.num_agents, self.observation_space)
 
-        self.FL_env = [FLServer(self.args.n_clients,dataset_name) for dataset_name in self.args.dataset_names]
+        self.FL_env = [FLServer(self.args.n_clients,dataset_name,self.args.non_iid_level) for dataset_name in self.args.dataset_names]
         obs = np.random.randn(self.num_agents, self.observation_space)
         self.last_acc = [0.0, 0.0, 0.0]
         self.delay_lst = [[],[],[]]
@@ -167,10 +167,10 @@ class MultiAgentEnv:
         delta_acc = np.array([5 if state_acc[id] > self.last_acc[id] else 0 for id in range(self.num_agents)])
         # rewards = np.add([ac*10+d_ac for ac,d_ac in zip(state_acc,delta_acc)],
         #                         [2.5*num_participating[id]-quan_schem[id] for id in range(self.num_agents)])
-        rewards = 2.5*rwd_pre
-        # rewards = np.add(np.add([ac*20 for ac,ls in zip(state_acc,state_loss)],
-        #                         [quan_schem[id]-self.comm_overheads[id]*50 if id !=2 else quan_schem[id]-self.comm_overheads[id]/1.5 for id in range(self.num_agents)]),
-        #                         rwd_pre)   # acc_up + (B/B_total * quan_bit_avg*num_clients)/(com_overheads_total) + rwd_pre
+        # rewards = 2*rwd_pre
+        rewards = np.add(np.add([ac*20 for ac,ls in zip(state_acc,state_loss)],
+                                [quan_schem[id]-self.comm_overheads[id]*50 if id !=2 else quan_schem[id]-self.comm_overheads[id]/1.5 for id in range(self.num_agents)]),
+                                rwd_pre)   # acc_up + (B/B_total * quan_bit_avg*num_clients)/(com_overheads_total) + rwd_pre
         rewards = np.clip(rewards, -75, 75)
         
         done = False
@@ -203,7 +203,7 @@ class EpisodeRunner:
         self.env.reset()
         self.t = 0
 
-    def run(self, test_mode=False):
+    def run(self, test_mode=False,excel_dir=None):
         # wb = Workbook()
         # ws1 = wb.active
         self.reset()
@@ -249,8 +249,9 @@ class EpisodeRunner:
             self.batch.update(post_transition_data, ts=self.t)
 
             self.t += 1
-        # for server_id in range(3):
-        #     self.env.FL_env[server_id].save_metrics_to_excel(excel_dir=f'./rsults')
+        if test_mode:
+            for server_id in range(3):
+                self.env.FL_env[server_id].save_metrics_to_excel(excel_dir)
         return self.batch
     
 

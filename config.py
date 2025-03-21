@@ -9,11 +9,11 @@ def fetch_args():
     #FL
     parser.add_argument('--n_clients', type=int, default=5, help='n_clients')
     parser.add_argument('--dataset_names',type=list,default=['MNIST', 'FashionMNIST', 'CIFAR10'],help='dataset_names')
-    
-
+    parser.add_argument('--non_iid_level', type=float, default=1, help='non_iid_alpha')
+    parser.add_argument('--expectile', type=float, default=0.5, help='expectile')
     #env
     parser.add_argument('--n_agents', type=int, default=3, help='n_agents')
-    parser.add_argument('--n_actions', type=int, default=27, help='n_actions') #quantization_bit 
+    parser.add_argument('--n_actions', type=int, default=27, help='n_actions') 
     parser.add_argument('--obs_dim', type=int, default=12, help='obs_dim')
     parser.add_argument('--state_dim', type=int, default=14, help='state_dim')
     parser.add_argument('--action_is_mix', type=bool, default=False, help='action_is_mix')
@@ -67,9 +67,9 @@ def fetch_args():
     parser.add_argument('--tensorboard_freq', type=int, default=1, help='tensorboard_freq')
     parser.add_argument('--save_model_freq', type=int, default=100, help='save_model_freq')
     parser.add_argument('--checkpoint_dir', type=str, default='checkpoint', help='checkpoint_dir')
-    parser.add_argument('--log_dir', type=str, default='logs', help='logdir')
+    
     parser.add_argument('--save_model_dir', type=str, default='model', help='save_model_dir')
-
+    parser.add_argument('--log_dir', type=str, default='logs', help='logdir')
     parser.add_argument('--load_replay_buffer', type=bool, default=True, help='load_replay_buffer')
 
 
