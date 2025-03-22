@@ -156,10 +156,10 @@ class FLClient(nn.Module):
 
 # 定义联邦学习服务器
 class FLServer:
-    def __init__(self, num_clients, dataset_names,Noniid_level=0.65,reload=False):
+    def __init__(self, num_clients, dataset_names,Noniid_level=1,reload=False,client = FLClient):
         self.num_clients = num_clients
-        self.clients = [FLClient(i, dataset_names) for i in range(num_clients)]
-        self.global_model = FLClient("Server",dataset_names)  # 创建全局模型
+        self.clients = [client(i, dataset_names) for i in range(num_clients)]
+        self.global_model = client("Server",dataset_names)  # 创建全局模型
         self.avg_losses = []
         self.avg_accuracies = []
         self.test_losses = []
@@ -233,13 +233,13 @@ class FLServer:
             print(f"Client {i} has {len(client_dataset)} samples")
             print_class_distribution(client_dataset)
 
-    def train(self, num_rounds, num_participating, local_epochs, local_batch_size,quantization_bit,clients_cpu_fre=[0.5,0.5,0.5,0.5,0.5],bandwidth=10e6):
+    def train(self, num_rounds, num_participating, local_epochs, local_batch_size,quantization_bit,clients_cpu_fre=[0.5,0.5,0.5,0.5,0.5],bandwidth=10e6,AdaQuantFL_enable=False):
 
         clients_cpu_fre=np.multiply(clients_cpu_fre,1e9) #GHz->Hz
         bandwidth=bandwidth*1e6 #MHz->Hz
         quan_bit_avg = []
         # 训练全局模型
-        for round in range(num_rounds):
+        for round in range(num_rounds):  
             # 随机选择参与本轮训练的客户端
             # num_participating = min(num_participating, self.num_clients)
             participating_clients = np.random.choice(self.num_clients, num_participating, replace=False)
@@ -289,13 +289,16 @@ class FLServer:
                 print(f"local_epochs: {local_epochs}, local_batch_size: {local_batch_size}, quantization_bit: {quantization_bit}")
                 print(f"Round: {true_iter}, Test Loss: {test_loss}, Test Accuracy: {test_accuracy}, Communication Cost(MByte): {communication_cost}")
                 print("---------------------------------------------------------")
-            # 保存全局模型
-            # if round == num_rounds - 1:
-            #     timestamp = datetime.datetime.now().strftime("%Y%m%d%H")
-            #     torch.save(self.global_model.state_dict(), f'./checkpoint/global_model_{self.global_model.dataset_name}_{timestamp}.pth')
+            #AdaQuantFL
+            if AdaQuantFL_enable:
+                if round == 0:
+                    F0 = self.avg_losses[-1] * 1
+                else:
+                    Fk = self.avg_losses[-1] * 1
+                    s_k = np.round(np.sqrt(F0/Fk) * quantization_bit[0])
+                    quantization_bit = np.clip([s_k]*5,1,32)  
             terminate = False
-        episode_result = np.stack((np.array(self.avg_losses[-1]), np.array(self.avg_accuracies[-1]), np.array(self.test_losses[-1]), np.array(self.test_accuracies[-1]), np.array(self.time_lapse[-1]), np.array(self.energy_consume[-1])))
-        
+        episode_result = np.stack((np.array(self.avg_losses[-1]), np.array(self.avg_accuracies[-1]), np.array(self.test_losses[-1]), np.array(self.test_accuracies[-1]), np.array(self.time_lapse[-1]), np.array(self.energy_consume[-1])))  
         return true_iter,np.mean(quan_bit_avg),communication_cost,episode_result
 
     # quantized_params = [quantize(param.detach(), {'n': client.quantization_bit}) for param, client_id in zip(client_params, participating_clients) for client in self.clients if client.client_id == client_id]
@@ -344,7 +347,7 @@ class FLServer:
             test_accuracy = test_correct / len(test_dataset)
 
             return test_loss, test_accuracy
-    def save_metrics_to_excel(self, excel_dir,band):
+    def save_metrics_to_excel(self, excel_dir,band=[10,10,10]):
         # 如果路径不存在，则创建路径
         if not os.path.exists(excel_dir):
             os.makedirs(excel_dir)
@@ -369,10 +372,54 @@ class FLServer:
         # 保存到excel_dir路径文件夹下
         df.to_excel(f'{excel_dir}/'+f'{self.global_model.dataset_name}.xlsx', index=False)
 
-# num_clients = 5 
-# dataset_names = ['MNIST', 'FashionMNIST', 'CIFAR10']
-# # 设置随机数种子
-# SEED = 156862
+class FLClient_Prox(FLClient):
+    def __init__(self, client_id, dataset_name,cpu_freq=0,transmission_power=0):
+        super(FLClient_Prox, self).__init__(client_id, dataset_name,cpu_freq,transmission_power)
+        self.mu = 0.1
+
+    def local_train(self,global_model, epochs, batch_size,bandwidth=10e6):
+        self.load_state_dict(global_model.state_dict())
+        self.model.train()
+        dataloader = DataLoader(self.dataset, batch_size=batch_size, shuffle=True)
+
+        optimizer = torch.optim.Adam(self.parameters(), lr=0.001)
+        criterion = nn.CrossEntropyLoss()
+
+        losses = []
+        accuracies = []
+
+        for epoch in range(epochs):
+            epoch_loss = 0
+            correct = 0
+            for data, target in dataloader:
+                data, target = data.to(self.device), target.to(self.device)
+                optimizer.zero_grad()
+                output = self.forward(data)
+                loss = criterion(output, target)
+
+                #FedProx
+                prox_term = 0
+                for w, w_glob in zip(self.parameters(), global_model.parameters()):
+                    prox_term += (self.mu / 2) * torch.norm(w - w_glob) ** 2
+                loss += prox_term
+
+                loss.backward()
+                optimizer.step()
+
+                epoch_loss += loss.item()
+                _, predicted = torch.max(output, 1)
+                correct += (predicted == target).sum().item()
+            losses.append(epoch_loss / len(dataloader))
+            accuracies.append(correct / len(dataloader.dataset))
+            print(f"Client ID: {self.client_id}, Local Epochs: {epoch+1}/{epochs}")
+            print(f"Client Loss: {losses[-1]}, Client Accuracy: {accuracies[-1]}")
+        
+        self.local_computation_delay = self.calculate_local_computation_delay(self.datasetsize_Byte, epochs)
+        self.local_computation_energy = self.calculate_local_computation_energy(self.datasetsize_Byte, epochs)
+        self.upload_delay = self.calculate_upload_delay(bandwidth)
+        self.upload_energy = self.calculate_upload_energy(self.upload_delay)
+
+        return losses, accuracies
 
 
 
@@ -382,20 +429,14 @@ if __name__ == '__main__':
     num_participating = [3, 3, 3]
     local_epochs = [3, 3, 3]
     batch_size = [128, 128, 128]
-    quantization_bit = [[8, 8, 8, 8, 8],[8,8,8,8,8],[8,8,8,8,8]]
+    quantization_bit = [[2,2,2,2,2],[2,2,2,2,2],[2,2,2,2,2]]
     cpu_freq = [[0.5,0.6,0.7,1,0.5],[0.5,0.8,0.6,0.7,0.5],[0.5,0.8,1.0,0.7,0.5]]
     BW = [10e6,10e6,10e6]
-    # L1 = FLServer(num_clients, 'MNIST')
-    # Name,iter,test_loss,test_acc,train_loss,train_acc,time_lapse,energy_consume,terminate = L1.train(5, num_participating, local_epochs, batch_size, quantization_bit,BW)
-    # L1.plot_metrics(local_epochs, batch_size, quantization_bit)
-    # 调用函数以启动进程
-    # t1=time.time()
-    # muti_proc_result = start_processes(num_participating, local_epochs, batch_size, quantization_bit,BW, reload=False)
-    
-    # print("Time cost: ",time.time()-t1)
-    # print(muti_proc_result)
+
     import os
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
-    FL_env = [FLServer(8, dataset_name) for dataset_name in dataset_names]
+    FL_env = [FLServer(5, dataset_name,client=FLClient_Prox) for dataset_name in dataset_names]
+    sav_dir = './results/Prox_adaquant/'
     for id in range(3):
-        FL_env[id].train(30,3,3,256,quantization_bit[id],cpu_freq[id],BW[id])
+        FL_env[id].train(40,3,3,256,quantization_bit[id],cpu_freq[id],BW[id],AdaQuantFL_enable=True)
+        FL_env[id].save_metrics_to_excel(sav_dir)
