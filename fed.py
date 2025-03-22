@@ -344,7 +344,7 @@ class FLServer:
             test_accuracy = test_correct / len(test_dataset)
 
             return test_loss, test_accuracy
-    def save_metrics_to_excel(self, excel_dir):
+    def save_metrics_to_excel(self, excel_dir,band):
         # 如果路径不存在，则创建路径
         if not os.path.exists(excel_dir):
             os.makedirs(excel_dir)
@@ -358,13 +358,16 @@ class FLServer:
             'Overheads': self.com_overheads,
             'Energy': self.energy_consume,
             'Delay': self.time_lapse,
+            'bw1':band[0],
+            'bw2':band[1],
+            'bw3':band[2],
         }
 
         # 创建一个DataFrame
         df = pd.DataFrame(data)
 
         # 保存到excel_dir路径文件夹下
-        df.to_excel(f'{excel_dir}{self.global_model.dataset_name}_client10iid6.xlsx', index=False)
+        df.to_excel(f'{excel_dir}/'+f'{self.global_model.dataset_name}.xlsx', index=False)
 
 # num_clients = 5 
 # dataset_names = ['MNIST', 'FashionMNIST', 'CIFAR10']

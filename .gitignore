@@ -1,5 +1,7 @@
 figures/
 figure/
+results/
+*.pdf
 logs/
 *.xlsx
 *.csv

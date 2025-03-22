@@ -7,14 +7,18 @@ LR=1e-4
 GAMMA=0.95
 BATCH_SIZE=64
 EXPECTILE=0.2
-IS_TEST=0
+IS_TEST=1
+EXCEL_DIR="results/expectile2"
 
 SAVE_MODEL_DIR="models/${EXPECTILE}-${BATCH_SIZE}"
-LOG_DIR="logs/expectile${EXPECTILE}-${BATCH_SIZE}"
 NON_IID_LEVEL=1
 # 解析命令行参数
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --excel_dir)
+            EXCEL_DIR=$2
+            shift 2
+            ;;
         --expectile)
             EXPECTILE=$2
             shift 2
@@ -35,10 +39,6 @@ while [[ $# -gt 0 ]]; do
             SAVE_MODEL_DIR=$2
             shift 2
             ;;
-        --log_dir)
-            LOG_DIR=$2
-            shift 2
-            ;;
         --non_iid_level)
             NON_IID_LEVEL=$2
             shift 2
@@ -55,15 +55,14 @@ while [[ $# -gt 0 ]]; do
 done
 
 # 设置实验名称，用于日志目录
-EXPERIMENT_NAME="pareto__$(date +'%Y%m%d%H%M%S')"
+EXPERIMENT_NAME="pareto_exp_expectile${EXPECTILE}_test_$(date +'%Y%m%d%H%M%S')"
 
 echo "开始实验: ${EXPERIMENT_NAME}"
-echo "Expectile: $EXPECTILE, 非独立同分布等级: $NON_IID_LEVEL,BatchSize: $BATCH_SIZE,种子: $SEED, 学习率: $LR, 折扣因子: $GAMMA,"
+echo "Expectile: $EXPECTILE, 非独立同分布等级: $NON_IID_LEVEL,test: $IS_TEST"
 
 # 运行程序
 python run.py \
     --seed $SEED \
-    --log_dir $LOG_DIR \
     --save_model_dir $SAVE_MODEL_DIR \
     --lr $LR \
     --gamma $GAMMA \
@@ -71,5 +70,8 @@ python run.py \
     --non_iid_level $NON_IID_LEVEL \
     --batch_size $BATCH_SIZE\
     --is_test $IS_TEST\
+    --expectile $EXPECTILE\
+    --excel_dir $EXCEL_DIR
+
 
 echo "实验 ${EXPERIMENT_NAME} 已完成"

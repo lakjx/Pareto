@@ -71,7 +71,9 @@ def fetch_args():
     parser.add_argument('--save_model_dir', type=str, default='model', help='save_model_dir')
     parser.add_argument('--log_dir', type=str, default='logs', help='logdir')
     parser.add_argument('--load_replay_buffer', type=bool, default=True, help='load_replay_buffer')
-
+    parser.add_argument('--is_test', type=int, default=0, help='is_test')
+    #不能默认给的参数
+    parser.add_argument('--excel_dir', type=str,default=None, help='excel_dir')
 
 
 

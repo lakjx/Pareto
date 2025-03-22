@@ -124,11 +124,11 @@ class MultiAgentEnv:
                     samples =np.round(samples)
                 quantization_bit[id] = samples.tolist()
 
-            #根据self.last_quantization_bit计算每个agent的带宽，超过30则按比例分配
-            BW = [self.last_quantization_bit[id] for id in range(self.num_agents)]
-            total = sum(BW)
+            
+            BW_origin = [self.last_quantization_bit[id] for id in range(self.num_agents)]
+            total = sum(BW_origin)
             # if total > 30:
-            BW = [np.round(30* (i / total),2) for i in BW]
+            BW = [np.round(30* (i / total),2) for i in BW_origin]
 
         quan_schem=[]
         obs_pre = []
@@ -175,7 +175,7 @@ class MultiAgentEnv:
         
         done = False
         
-        return np.reshape(rewards,(self.num_agents,1)), done
+        return np.reshape(rewards,(self.num_agents,1)), done, BW_origin
     
     def get_obs(self):
         return self.obs
@@ -235,7 +235,7 @@ class EpisodeRunner:
                     actions_env[..., i+1] = actions_env[..., i+1] * (max_value - min_value) / 2 + (max_value + min_value) / 2
                     actions_env[..., i+1] = torch.clip(actions_env[..., i+1], min_value, max_value)
 
-            reward, terminated = self.env.step(actions_env[0])
+            reward, terminated,origin_band = self.env.step(actions_env[0])
             episode_return += reward
 
             terminated = True if self.t == self.episode_limit else False
@@ -251,7 +251,7 @@ class EpisodeRunner:
             self.t += 1
         if test_mode:
             for server_id in range(3):
-                self.env.FL_env[server_id].save_metrics_to_excel(excel_dir)
+                self.env.FL_env[server_id].save_metrics_to_excel(excel_dir,origin_band)
         return self.batch
     
 

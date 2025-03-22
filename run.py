@@ -11,6 +11,7 @@ from Learner.Q_learner import Q_Learner
 from Learner.pareto_learner import Pareto_Learner
 from config import fetch_args
 def run_train(args):
+    args.is_test = args.is_test == 1
     #检查是否存在args.logs_dir文件夹，如果不存在则创建
     if not os.path.exists(args.log_dir):
         os.makedirs(args.log_dir)
@@ -51,15 +52,17 @@ def run_train(args):
     # Learner = PPO_Learner(mac=mac,args=args,scheme=scheme)
     Learner = Pareto_Learner(mac=mac,args=args,scheme=scheme)
     # #导入模型
-    # Learner.load_models(save_model_dir)
+    if args.is_test:
+        Learner.load_models(save_model_dir)
     if args.use_cuda:
         Learner.cuda()
     
     #Run training
     episode = 0
     while episode < 1000:
-        # episode_batch = runner.run(test_mode=False)
-        # return 0
+        if args.is_test:
+            episode_batch = runner.run(test_mode=True,excel_dir=args.excel_dir) 
+            return 0
         # buffer.insert_episode_batch(episode_batch)
         # # buffer.save("replay_buffer_new819.pt")
         if buffer.can_sample(args.batch_size):           
