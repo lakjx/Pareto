@@ -421,7 +421,56 @@ class FLClient_Prox(FLClient):
 
         return losses, accuracies
 
+class FLClient_FedDQ(FLClient):
+    def __init__(self, client_id, dataset_name,cpu_freq=0,transmission_power=0):
+        super(FLClient_FedDQ, self).__init__(client_id, dataset_name,cpu_freq,transmission_power)
+        self.resolution = 0.01
 
+    def local_train(self,global_model, epochs, batch_size,bandwidth=10e6):
+        self.load_state_dict(global_model.state_dict())
+        self.model.train()
+        dataloader = DataLoader(self.dataset, batch_size=batch_size, shuffle=True)
+
+        optimizer = torch.optim.Adam(self.parameters(), lr=0.001)
+        criterion = nn.CrossEntropyLoss()
+
+        losses = []
+        accuracies = []
+
+        for epoch in range(epochs):
+            epoch_loss = 0
+            correct = 0
+            for data, target in dataloader:
+                data, target = data.to(self.device), target.to(self.device)
+                optimizer.zero_grad()
+                output = self.forward(data)
+                loss = criterion(output, target)
+
+                loss.backward()
+                optimizer.step()
+
+                epoch_loss += loss.item()
+                _, predicted = torch.max(output, 1)
+                correct += (predicted == target).sum().item()
+            losses.append(epoch_loss / len(dataloader))
+            accuracies.append(correct / len(dataloader.dataset))
+            print(f"Client ID: {self.client_id}, Local Epochs: {epoch+1}/{epochs}")
+            print(f"Client Loss: {losses[-1]}, Client Accuracy: {accuracies[-1]}")
+        
+        #FedDQ
+        bitsnode = 0
+        for name, param in self.named_parameters():
+            diff_w = (param - global_model.state_dict()[name]).detach().cpu().numpy()
+            rang_diff = np.max(diff_w) - np.min(diff_w)
+            bitsnode += max(np.ceil(np.log2(rang_diff/self.resolution)),2)
+        self.quantization_bit = np.round(bitsnode/len(list(self.model.parameters())))
+
+        self.local_computation_delay = self.calculate_local_computation_delay(self.datasetsize_Byte, epochs)
+        self.local_computation_energy = self.calculate_local_computation_energy(self.datasetsize_Byte, epochs)
+        self.upload_delay = self.calculate_upload_delay(bandwidth)
+        self.upload_energy = self.calculate_upload_energy(self.upload_delay)
+
+        return losses, accuracies
 
 if __name__ == '__main__':
     set_random_seed(1568)
@@ -429,14 +478,16 @@ if __name__ == '__main__':
     num_participating = [3, 3, 3]
     local_epochs = [3, 3, 3]
     batch_size = [128, 128, 128]
-    quantization_bit = [[2,2,2,2,2],[2,2,2,2,2],[2,2,2,2,2]]
+    # quantization_bit = [[2,2,2,2,2],[2,2,2,2,2],[2,2,2,2,2]]
+    quantization_bit = [[8,8,8,8,8],[8,8,8,8,8],[8,8,8,8,8]]
     cpu_freq = [[0.5,0.6,0.7,1,0.5],[0.5,0.8,0.6,0.7,0.5],[0.5,0.8,1.0,0.7,0.5]]
     BW = [10e6,10e6,10e6]
 
     import os
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
-    FL_env = [FLServer(5, dataset_name,client=FLClient_Prox) for dataset_name in dataset_names]
-    sav_dir = './results/Prox_adaquant/'
+    # FL_env = [FLServer(5, dataset_name,client=FLClient_Prox) for dataset_name in dataset_names]
+    FL_env = [FLServer(5, dataset_name,client=FLClient_FedDQ) for dataset_name in dataset_names]
+    sav_dir = './results/FedDQ/'
     for id in range(3):
-        FL_env[id].train(40,3,3,256,quantization_bit[id],cpu_freq[id],BW[id],AdaQuantFL_enable=True)
+        FL_env[id].train(40,3,3,256,quantization_bit[id],cpu_freq[id],BW[id],AdaQuantFL_enable=False)
         FL_env[id].save_metrics_to_excel(sav_dir)
