@@ -233,7 +233,7 @@ class FLServer:
             print(f"Client {i} has {len(client_dataset)} samples")
             print_class_distribution(client_dataset)
 
-    def train(self, num_rounds, num_participating, local_epochs, local_batch_size,quantization_bit,clients_cpu_fre=[0.5,0.5,0.5,0.5,0.5],bandwidth=10e6,AdaQuantFL_enable=False):
+    def train(self, num_rounds, num_participating, local_epochs, local_batch_size,quantization_bit,clients_cpu_fre=[0.5,0.5,0.5,0.5,0.5],bandwidth=10e6,AdaQuantFL_enable=False,FedDQ_enable=False):
 
         clients_cpu_fre=np.multiply(clients_cpu_fre,1e9) #GHz->Hz
         bandwidth=bandwidth*1e6 #MHz->Hz
@@ -296,7 +296,9 @@ class FLServer:
                 else:
                     Fk = self.avg_losses[-1] * 1
                     s_k = np.round(np.sqrt(F0/Fk) * quantization_bit[0])
-                    quantization_bit = np.clip([s_k]*5,1,32)  
+                    quantization_bit = np.clip([s_k]*5,1,32)
+            if FedDQ_enable:
+                    quantization_bit = [ue.quantization_bit for ue in self.clients]
             terminate = False
         episode_result = np.stack((np.array(self.avg_losses[-1]), np.array(self.avg_accuracies[-1]), np.array(self.test_losses[-1]), np.array(self.test_accuracies[-1]), np.array(self.time_lapse[-1]), np.array(self.energy_consume[-1])))  
         return true_iter,np.mean(quan_bit_avg),communication_cost,episode_result
@@ -479,15 +481,16 @@ if __name__ == '__main__':
     local_epochs = [3, 3, 3]
     batch_size = [128, 128, 128]
     # quantization_bit = [[2,2,2,2,2],[2,2,2,2,2],[2,2,2,2,2]]
-    quantization_bit = [[8,8,8,8,8],[8,8,8,8,8],[8,8,8,8,8]]
+    # quantization_bit = [[8,8,8,8,8],[8,8,8,8,8],[8,8,8,8,8]]
+    quantization_bit = [[32,32,32,32,32],[32,32,32,32,32],[32,32,32,32,32]]
     cpu_freq = [[0.5,0.6,0.7,1,0.5],[0.5,0.8,0.6,0.7,0.5],[0.5,0.8,1.0,0.7,0.5]]
     BW = [10e6,10e6,10e6]
 
     import os
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
-    # FL_env = [FLServer(5, dataset_name,client=FLClient_Prox) for dataset_name in dataset_names]
-    FL_env = [FLServer(5, dataset_name,client=FLClient_FedDQ) for dataset_name in dataset_names]
-    sav_dir = './results/FedDQ/'
+    FL_env = [FLServer(5, dataset_name,client=FLClient,Noniid_level=0.9) for dataset_name in dataset_names]
+    # FL_env = [FLServer(5, dataset_name,client=FLClient_FedDQ,Noniid_level=0.5) for dataset_name in dataset_names]
+    sav_dir = './results/non_iid/Fedavgfix32_9/'
     for id in range(3):
-        FL_env[id].train(40,3,3,256,quantization_bit[id],cpu_freq[id],BW[id],AdaQuantFL_enable=False)
+        FL_env[id].train(40,3,3,256,quantization_bit[id],cpu_freq[id],BW[id])
         FL_env[id].save_metrics_to_excel(sav_dir)
