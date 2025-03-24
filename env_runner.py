@@ -89,11 +89,12 @@ class MultiAgentEnv:
             change_per_agent = [self.combinations[int(actions[id])]for id in range(self.num_agents)]
             print(f"actions_change:{change_per_agent}")
             num_participating = [self.last_participating[id]+change_per_agent[id][0] for id in range(self.num_agents)]
-            #检查num_participating是否在合理范围内（1-5）
-            if (self.last_acc[2]) <=0.5:
-                num_participating = [min(max(3,num_participating[id]),self.args.n_clients) for id in range(self.num_agents)]
-            else:
-                num_participating = [min(max(2,num_participating[id]),self.args.n_clients) for id in range(self.num_agents)]
+            #检查num_participating范围内 e.g. 1-5
+            num_participating = [min(max(2,num_participating[id]),self.args.n_clients) for id in range(self.num_agents)]
+            # if (self.last_acc[2]) <=0.5:
+            #     num_participating = [min(max(3,num_participating[id]),self.args.n_clients) for id in range(self.num_agents)]
+            # else:
+                # num_participating = [min(max(2,num_participating[id]),self.args.n_clients) for id in range(self.num_agents)]
             self.last_participating = num_participating
 
             cpu_freq = [self.last_cpu_freq[id]+change_per_agent[id][1]*0.5 for id in range(self.num_agents)]
@@ -108,11 +109,12 @@ class MultiAgentEnv:
                 cpu_freq[id] = (np.round(samples,3)).tolist()
             
             quantization_bit = [self.last_quantization_bit[id]+change_per_agent[id][2]*2 for id in range(self.num_agents)]
-            #检查quantization_bit是否在合理范围内（3-24）
-            if (self.last_acc[2]) <=0.5:
-                quantization_bit = [min(max(4,quantization_bit[id]),24) for id in range(self.num_agents)]
-            else:
-                quantization_bit = [min(max(2,quantization_bit[id]),24) for id in range(self.num_agents)]
+            #检查quantization_bit是否在合理范围内 e.g. 2-32
+            quantization_bit = [min(max(2,quantization_bit[id]),32) for id in range(self.num_agents)]
+            # if (self.last_acc[2]) <=0.5:
+            #     quantization_bit = [min(max(4,quantization_bit[id]),24) for id in range(self.num_agents)]
+            # else:
+            #     quantization_bit = [min(max(2,quantization_bit[id]),24) for id in range(self.num_agents)]
             self.last_quantization_bit = quantization_bit[:]
             #采样
             for id in range(self.num_agents):

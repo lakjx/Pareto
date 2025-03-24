@@ -356,7 +356,7 @@ class MAPPO:
 def get_args():
     # tasks = ['MNIST', 'FashionMNIST', 'CIFAR10', 'QMNIST', 'SVHN']
     tasks = ['MNIST', 'FashionMNIST']
-    env_name = 'mappo_a5'
+    env_name = 'mappo_a2'
     
     dict = {
         'n_agents': len(tasks),
@@ -370,7 +370,7 @@ def get_args():
         'gae_lambda': 0.95,
         'ppo_epochs': 10,
         'clip_epsilon': 0.2,
-        'batch_size': 64,
+        'batch_size': 8,
         'buffer_size': 4096,
         'num_episodes': 1000,
         'episode_limit': 15,
