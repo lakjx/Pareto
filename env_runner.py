@@ -174,7 +174,14 @@ class MultiAgentEnv:
             quan_parti_self = quan_parti.copy()
             quan_parti_self.pop(id)
             r= state_acc[id]*15 + 32.5*quan_parti[id]/sum(quan_parti_self) + rwd_pre[id]
-            r = r - com_overheads_total/4 if com_overheads_total > 30 else r - com_overheads_total
+            if com_overheads_total > 30:
+                r = r - com_overheads_total/4
+            elif com_overheads_total < 1:
+                r = r - com_overheads_total*15
+            elif com_overheads_total > 15 and com_overheads_total < 30:
+                r = r - com_overheads_total
+            else:
+                r = r - com_overheads_total*5
             rewards.append(r)
         rewards = np.array(rewards)
         # rewards = np.add(np.add([ac*20 for ac,ls in zip(state_acc,state_loss)],
