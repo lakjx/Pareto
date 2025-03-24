@@ -250,9 +250,8 @@ class MAPPO:
             print("-------An environment episode is done.------")
             print(f"Episode rewards: {episode_rewards_str}")
             # 记录训练信息
-            self.writer.add_scalar(f'rwd_agent_0', episode_rewards[0], episode)
-            self.writer.add_scalar(f'rwd_agent_1', episode_rewards[1], episode)
-            self.writer.add_scalar(f'rwd_agent_2', episode_rewards[2], episode)
+            for id_ in range(self.num_agents):
+                self.writer.add_scalar(f'rwd_agent_{id_}', episode_rewards[id_], episode)
 
             # 执行PPO更新
             if len(self.buffer) >= self.args.batch_size:
@@ -355,13 +354,17 @@ class MAPPO:
 
 
 def get_args():
+    tasks = ['MNIST', 'FashionMNIST', 'CIFAR10', 'QMNIST', 'SVHN']
+    env_name = 'mappo_a5'
+    
     dict = {
-        'n_agents': 5,
-        'obs_dim': 14,
-        'state_dim': 22,
+        'n_agents': len(tasks),
+        'obs_dim': 9+len(tasks),
+        'state_dim': 2+4*len(tasks),
         'n_actions': 27,
         'actor_lr': 0.001,
         'critic_lr': 0.001,
+        'action_is_mix': False,
         'gamma': 0.99,
         'gae_lambda': 0.95,
         'ppo_epochs': 10,
@@ -371,15 +374,15 @@ def get_args():
         'num_episodes': 1000,
         'episode_limit': 15,
 
-        'dataset_names': ['MNIST', 'FashionMNIST', 'CIFAR10', 'QMNIST', 'SVHN'],
+        'dataset_names': tasks,
         'n_clients': 5,
         'non_iid_level': 1,
-        'action_is_mix': False,
-
-        'model_save_dir': 'checkpoint/mappo_a5/',
-        'buffer_save_dir': 'buffer_mappo_a5',
-        'env_name': 'mappo_a5',
+        
+        'model_save_dir': 'checkpoint/'+env_name+'/',
+        'buffer_save_dir': 'buffer'+env_name,
+        'env_name': env_name,
     }
+    dict
     return SimpleNamespace(**dict)
 
 
