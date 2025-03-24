@@ -354,7 +354,8 @@ class MAPPO:
 
 
 def get_args():
-    tasks = ['MNIST', 'FashionMNIST', 'CIFAR10', 'QMNIST', 'SVHN']
+    # tasks = ['MNIST', 'FashionMNIST', 'CIFAR10', 'QMNIST', 'SVHN']
+    tasks = ['MNIST', 'FashionMNIST']
     env_name = 'mappo_a5'
     
     dict = {
