@@ -264,16 +264,14 @@ class Pareto_Learner:
             self.writer.add_scalar("td_error_abs", sum(critic_train_stats["td_error_abs"]) / ts_logged, self.critic_training_steps)
             # self.writer.add_scalar("target_mean", sum(critic_train_stats["target_mean"]) / ts_logged, self.critic_training_steps)
             self.writer.add_scalar("q_taken_mean", sum(critic_train_stats["q_taken_mean"]) / ts_logged, self.critic_training_steps)
-            self.writer.add_scalar("target_reward1", sum(critic_train_stats["target_reward1"]) / ts_logged, self.critic_training_steps)
-            self.writer.add_scalar("target_reward2", sum(critic_train_stats["target_reward2"]) / ts_logged, self.critic_training_steps)
-            self.writer.add_scalar("target_reward3", sum(critic_train_stats["target_reward3"]) / ts_logged, self.critic_training_steps)
-
+            for id_ in range(self.n_agents):
+                self.writer.add_scalar("target_reward{}".format(id_+1), sum(critic_train_stats["target_reward{}".format(id_+1)]) / ts_logged, self.critic_training_steps)
+                self.writer.add_scalar("advantage_mean{}".format(id_+1), (advantages[:, :, id_]).sum().item(), self.critic_training_steps)
+            
             self.writer.add_scalar("pg_loss", pg_loss.item(), self.critic_training_steps)
             self.writer.add_scalar("agent_grad_norm", grad_norm, self.critic_training_steps)
             # self.writer.add_scalar("advantage_mean",(advantages * mask).sum().item() / mask.sum().item(), self.critic_training_steps)
-            self.writer.add_scalar("advantage_mean_agent1",advantages[:, :, 0].sum().item(), self.critic_training_steps)
-            self.writer.add_scalar("advantage_mean_agent2",advantages[:, :, 1].sum().item(), self.critic_training_steps)
-            self.writer.add_scalar("advantage_mean_agent3",advantages[:, :, 2].sum().item(), self.critic_training_steps)
+    
     def expectile_loss(self, diff, expectile):
         weight = th.where(diff > 0, th.tensor(expectile), th.tensor(1 - expectile))
         return weight * (diff ** 2)
@@ -296,10 +294,9 @@ class Pareto_Learner:
             "critic_grad_norm": [],
             "td_error_abs": [],
             "q_taken_mean": [],
-            "target_reward1": [],
-            "target_reward2": [],
-            "target_reward3": [],
         }
+        for id_ in range(self.n_agents):
+            running_log["target_reward{}".format(id_+1)] = []
 
         actions = batch["actions"][:, :-1]
         q = critic(batch)[0][:, :-1]
@@ -334,10 +331,9 @@ class Pareto_Learner:
         mask_elems = mask.sum().item()
         running_log["td_error_abs"].append((mask_td_error.abs().sum().item() / mask_elems))
         running_log["q_taken_mean"].append((q_current * mask).sum().item() / mask_elems)
-        # running_log["target_mean"].append((target_returns * mask).sum().item() / mask_elems)
-        running_log["target_reward1"].append((target_returns[:, :, 0]).sum().item())
-        running_log["target_reward2"].append((target_returns[:, :, 1]).sum().item())
-        running_log["target_reward3"].append((target_returns[:, :, 2]).sum().item())
+        
+        for id_ in range(self.n_agents):
+            running_log["target_reward{}".format(id_+1)].append((target_returns[:, :, id_]).sum().item())
 
         return advantage, running_log
     
