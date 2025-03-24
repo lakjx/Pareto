@@ -71,7 +71,38 @@ class FLClient(nn.Module):
                 nn.Dropout(0.2),
                 nn.Linear(in_features=64, out_features=10)
             )
-            # self.model = ResNet(BasicBlock, [2, 2, 2, 2], num_classes=10)
+        elif dataset_name == 'QMNIST':
+            self.model = nn.Sequential(
+            nn.Conv2d(1, 32, kernel_size=5, padding=2),  # 1通道输入(灰度图像)
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+            nn.Conv2d(32, 64, kernel_size=5, padding=2),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+            Flatten(),
+            nn.Linear(64 * 7 * 7, 120),  # QMNIST图像大小为28x28，经过两次池化后为7x7
+            nn.ReLU(),
+            nn.Linear(120, 84),
+            nn.ReLU(),
+            nn.Linear(84, 10)  
+            )
+        elif dataset_name == 'SVHN':    
+            self.model = nn.Sequential(
+                nn.Conv2d(3, 64, kernel_size=5, stride=1, padding=2),
+                nn.ReLU(inplace=True),
+                nn.MaxPool2d(kernel_size=3, stride=2, padding=1),
+                nn.LocalResponseNorm(4, alpha=0.001 / 9.0, beta=0.75, k=1),
+                nn.Conv2d(64, 64, kernel_size=5, stride=1, padding=2),
+                nn.ReLU(inplace=True),
+                nn.LocalResponseNorm(4, alpha=0.001 / 9.0, beta=0.75, k=1),
+                nn.MaxPool2d(kernel_size=3, stride=2, padding=1),
+                Flatten(),
+                nn.Linear(4096, 384),
+                nn.ReLU(inplace=True),
+                nn.Linear(384, 192),
+                nn.ReLU(inplace=True),
+                nn.Linear(192, 10)  
+            )    
         # 计算模型参数的大小
         self.model_size = sum(p.numel() for p in self.model.parameters()) * 4  # float类型的字节大小为4
         # 将模型加载到gpu上
@@ -172,7 +203,15 @@ class FLServer:
         elif dataset_names == 'FashionMNIST':
             self.dataset = datasets.FashionMNIST('./data', train=True, download=True, transform=transforms.ToTensor())
         elif dataset_names == 'CIFAR10':
-            self.dataset = datasets.CIFAR10('./data', train=True, download=True, transform=transforms.ToTensor())
+            transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=[0.4914, 0.4822, 0.4465], std=[0.2023, 0.1994, 0.2010])])
+            self.dataset = datasets.CIFAR10('./data', train=True, download=True, transform=transform)
+        elif dataset_names == 'QMNIST':
+            transform = transforms.Compose([transforms.ToTensor(),transforms.Normalize((0.1307,), (0.3081,))])
+            self.dataset = datasets.QMNIST('./data', what='train', compat=True, download=True, transform=transform)
+        elif dataset_names == 'SVHN':
+            transform = transforms.Compose([transforms.ToTensor(),transforms.Normalize((0.1307,), (0.3081,))])
+            self.dataset = datasets.SVHN('./data', split='train', download=True, transform=transform)
+        print(f"Distribution of the dataset:{dataset_names}..................................")
         self.distribute_data(non_iid_level=Noniid_level)
         if reload:
             self.global_model.load_state_dict(torch.load(f'./checkpoint/global_model_{dataset_names}.pth'))
@@ -213,12 +252,25 @@ class FLServer:
         data_indices = list(range(len(self.dataset)))
         np.random.shuffle(data_indices)
 
-        #获取数据集中所有类别
-        classes = np.unique(self.dataset.targets)
+        #获取数据集中所有类别 根据数据集类型处理
+        if isinstance(self.dataset,datasets.SVHN):
+            classes = np.unique(self.dataset.labels)
+        elif isinstance(self.dataset,datasets.QMNIST):
+            classes = np.unique(self.dataset.targets[:,0])
+        else:
+            classes = np.unique(self.dataset.targets)            
         num_classes = len(classes)
 
         # 计算每个客户端应该有多少个类别
         num_classes_per_client = int(num_classes * non_iid_level)
+
+        def get_label(idx):
+            if isinstance(self.dataset,datasets.SVHN):
+                return self.dataset.labels[idx]
+            elif isinstance(self.dataset,datasets.QMNIST):
+                return self.dataset.targets[idx][0]
+            else:
+                return self.dataset.targets[idx]
 
         for i, client in enumerate(self.clients):
             start = i * data_size
@@ -226,8 +278,14 @@ class FLServer:
 
             # 随机选择一些类别
             chosen_classes = torch.randperm(num_classes)[:num_classes_per_client].clone().detach()
+            
             # 只选择这些类别的数据
-            client_indices = [idx for idx in data_indices[start:end] if self.dataset.targets[idx] in chosen_classes]
+            client_indices = []
+            for idx in data_indices[start:end]:
+                if get_label(idx) in chosen_classes:
+                    client_indices.append(idx)
+            # client_indices = [idx for idx in data_indices[start:end] if self.dataset.targets[idx] in chosen_classes]
+            
             client_dataset = torch.utils.data.Subset(self.dataset, client_indices)
             client.load_data(client_dataset)
             print(f"Client {i} has {len(client_dataset)} samples")
@@ -328,8 +386,15 @@ class FLServer:
             elif self.global_model.dataset_name == 'FashionMNIST':
                 test_dataset = datasets.FashionMNIST('./data', train=False, download=True, transform=transforms.ToTensor())
             elif self.global_model.dataset_name == 'CIFAR10':
-                test_dataset = datasets.CIFAR10('./data', train=False, download=True, transform=transforms.ToTensor())
-           
+                transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=[0.4914, 0.4822, 0.4465], std=[0.2023, 0.1994, 0.2010])])
+                test_dataset = datasets.CIFAR10('./data', train=False, download=True, transform=transform)
+            elif self.global_model.dataset_name == 'QMNIST':
+                transform = transforms.Compose([transforms.ToTensor(),transforms.Normalize((0.1307,), (0.3081,))])
+                test_dataset = datasets.QMNIST('./data', what='test', compat=True, download=True, transform=transform)
+            elif self.global_model.dataset_name == 'SVHN':
+                transform = transforms.Compose([transforms.ToTensor(),transforms.Normalize((0.1307,), (0.3081,))])
+                test_dataset = datasets.SVHN('./data', split='test', download=True, transform=transform)
+
             global_model.to(device)
             global_model.eval()
             test_dataloader = DataLoader(test_dataset, batch_size=128, shuffle=False)
@@ -476,6 +541,8 @@ class FLClient_FedDQ(FLClient):
 
 if __name__ == '__main__':
     set_random_seed(1568)
+
+    ###----------------------- Base Experiment -----------------------###
     dataset_names = ['MNIST', 'FashionMNIST', 'CIFAR10']
     num_participating = [3, 3, 3]
     local_epochs = [3, 3, 3]
@@ -491,6 +558,6 @@ if __name__ == '__main__':
     FL_env = [FLServer(5, dataset_name,client=FLClient,Noniid_level=0.9) for dataset_name in dataset_names]
     # FL_env = [FLServer(5, dataset_name,client=FLClient_FedDQ,Noniid_level=0.5) for dataset_name in dataset_names]
     sav_dir = './results/non_iid/Fedavgfix32_9/'
-    for id in range(3):
+    for id in range(len(dataset_names)):
         FL_env[id].train(40,3,3,256,quantization_bit[id],cpu_freq[id],BW[id])
         FL_env[id].save_metrics_to_excel(sav_dir)

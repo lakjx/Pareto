@@ -259,7 +259,7 @@ class MAPPO:
                 print("Start to update the model......")
                 self.update()
             if episode % 50 == 0 and episode > 0:
-                self.save_buffer('mappobuffer_324')
+                self.save_buffer(self.args.buffer_save_dir)
             # if episode % 1 == 0 and episode > 0:
                 self.save_model(self.args.model_save_dir)
         self.writer.close()
@@ -356,9 +356,9 @@ class MAPPO:
 
 def get_args():
     dict = {
-        'n_agents': 3,
-        'obs_dim': 12,
-        'state_dim': 14,
+        'n_agents': 5,
+        'obs_dim': 14,
+        'state_dim': 22,
         'n_actions': 27,
         'actor_lr': 0.001,
         'critic_lr': 0.001,
@@ -371,13 +371,14 @@ def get_args():
         'num_episodes': 1000,
         'episode_limit': 15,
 
-        'dataset_names': ['MNIST', 'FashionMNIST', 'CIFAR10'],
+        'dataset_names': ['MNIST', 'FashionMNIST', 'CIFAR10', 'QMNIST', 'SVHN'],
         'n_clients': 5,
         'non_iid_level': 1,
         'action_is_mix': False,
 
-        'model_save_dir': 'checkpoint/mappo_debug/',
-        'env_name': 'run1',
+        'model_save_dir': 'checkpoint/mappo_a5/',
+        'buffer_save_dir': 'buffer_mappo_a5',
+        'env_name': 'mappo_a5',
     }
     return SimpleNamespace(**dict)
 

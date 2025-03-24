@@ -34,18 +34,18 @@ class MultiAgentEnv:
 
         self.FL_env = [FLServer(self.args.n_clients,dataset_name,self.args.non_iid_level) for dataset_name in self.args.dataset_names]
 
-        self.last_acc = [0.0, 0.0, 0.0]
-        self.delay_lst = [[],[],[]]
-        self.energy_lst = [[],[],[]]
-        self.comm_overheads = [0,0,0]
+        self.last_acc = [0.0]*self.num_agents
+        self.delay_lst = [[] for _ in range(self.num_agents)]
+        self.energy_lst = [[] for _ in range(self.num_agents)]
+        self.comm_overheads = [0]*self.num_agents
 
         self.obs = np.zeros((self.num_agents, self.observation_space))
         self.state = np.zeros(self.state_space)
 
         #记录上一次的动作
-        self.last_participating = [7, 7, 7]
-        self.last_cpu_freq = [1.5, 1.5, 1.5]
-        self.last_quantization_bit = [8, 8, 8]
+        self.last_participating = [7] * self.num_agents 
+        self.last_cpu_freq = [1.5] * self.num_agents
+        self.last_quantization_bit = [8] * self.num_agents
         return self.obs
     
     def step(self, actions):
@@ -54,13 +54,13 @@ class MultiAgentEnv:
             self.state = np.random.randn(self.state_space)
             rewards = np.random.randn(self.num_agents,1)
             done = False
-            return rewards, done, [8, 8, 8]
+            return rewards, done, [8] * self.num_agents
         actions = actions.cpu().numpy() if type(actions) != np.ndarray else actions
         if self.args.action_is_mix:
             num_participating = [int(actions[id][0])+1 for id in range(self.num_agents)]      
 
-            local_epochs = [3, 3, 3]
-            batch_size = [32, 32, 32]
+            local_epochs = [3] * self.num_agents  # 动态创建列表
+            batch_size = [256] * self.num_agents  # 动态创建列表
 
             cpu_freq = []
             for id in range(self.num_agents):
@@ -83,8 +83,8 @@ class MultiAgentEnv:
             if total > 30:
                 BW = [np.round(30* (i / total),2) for i in BW]
         else:           
-            local_epochs = [3, 3, 3]
-            batch_size = [256, 256, 256]
+            local_epochs = [3] * self.num_agents  # 动态创建列表
+            batch_size = [256] * self.num_agents  # 动态创建列表
 
             change_per_agent = [self.combinations[int(actions[id])]for id in range(self.num_agents)]
             print(f"actions_change:{change_per_agent}")
@@ -157,19 +157,26 @@ class MultiAgentEnv:
 
             quan_schem.append(quan_bit_avg)
             com_overheads_total += com_overheads
-        self.last_acc = state_acc
-        self.state = np.concatenate((np.array([fl_iter,com_overheads_total]),quan_schem,BW,state_loss,state_acc))  # 2+3+3+3+3=14
+        self.last_acc = state_acc.copy()
+        self.state = np.concatenate((np.array([fl_iter,com_overheads_total]),quan_schem,BW,state_loss,state_acc))  # 2+4*agent_num =22
         
-        self.obs = np.array([np.concatenate((t,quan_schem)) for t in obs_pre])  #shape (agent_num, 12)
+        self.obs = np.array([np.concatenate((t,quan_schem)) for t in obs_pre])  #shape (agent_num, 9+agent_num)
 
         #如果state_acc增长，则赋值5
         delta_acc = np.array([5 if state_acc[id] > self.last_acc[id] else 0 for id in range(self.num_agents)])
         # rewards = np.add([ac*10+d_ac for ac,d_ac in zip(state_acc,delta_acc)],
         #                         [2.5*num_participating[id]-quan_schem[id] for id in range(self.num_agents)])
-        # rewards = 2*rwd_pre
-        rewards = np.add(np.add([ac*20 for ac,ls in zip(state_acc,state_loss)],
-                                [quan_schem[id]-self.comm_overheads[id]*50 if id !=2 else quan_schem[id]-self.comm_overheads[id]/1.5 for id in range(self.num_agents)]),
-                                rwd_pre)   # acc_up + (B/B_total * quan_bit_avg*num_clients)/(com_overheads_total) + rwd_pre
+        rewards = []
+        quan_parti = [n * q for n, q in zip(num_participating, quan_schem)]
+        for id in range(self.num_agents):
+            quan_parti_self = quan_parti.copy()
+            quan_parti_self.pop(id)
+            r= state_acc[id]*15 + 32.5*quan_parti[id]/sum(quan_parti_self)-com_overheads_total/4 + rwd_pre[id]
+            rewards.append(r)
+        rewards = np.array(rewards)
+        # rewards = np.add(np.add([ac*20 for ac,ls in zip(state_acc,state_loss)],
+        #                         [quan_schem[id]-self.comm_overheads[id]*50 if id !=2 else quan_schem[id]-self.comm_overheads[id]/1.5 for id in range(self.num_agents)]),
+        #                         rwd_pre)   # acc_up + (B/B_total * quan_bit_avg*num_clients)/(com_overheads_total) + rwd_pre
         rewards = np.clip(rewards, -75, 75)
         
         done = False
@@ -249,7 +256,7 @@ class EpisodeRunner:
 
             self.t += 1
         if test_mode:
-            for server_id in range(3):
+            for server_id in range(self.env.num_agents):
                 self.env.FL_env[server_id].save_metrics_to_excel(excel_dir,origin_band)
         return self.batch
     
