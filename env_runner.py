@@ -21,10 +21,6 @@ class MultiAgentEnv:
         self.args = args
         # self.FL_env = [FLServer(args.n_clients,dataset_name) for dataset_name in args.dataset_names]
 
-        #初始化全局状态和观测
-        self.obs = np.random.randn(self.num_agents, self.observation_space)
-        self.state = np.random.randn(self.state_space)
-
         self.combinations = list(itertools.product([-1, 0, 1], repeat=3))
         random.shuffle(self.combinations)
         self.combinations = [(-1, -1, 0), (0, 0, 1), (0, 0, 0), (1, -1, 1), (0, -1, 0), (0, -1, -1), (-1, 0, 1), (1, 0, 1),(-1, -1, -1),
@@ -37,17 +33,20 @@ class MultiAgentEnv:
             return np.random.randn(self.num_agents, self.observation_space)
 
         self.FL_env = [FLServer(self.args.n_clients,dataset_name,self.args.non_iid_level) for dataset_name in self.args.dataset_names]
-        obs = np.random.randn(self.num_agents, self.observation_space)
+
         self.last_acc = [0.0, 0.0, 0.0]
         self.delay_lst = [[],[],[]]
         self.energy_lst = [[],[],[]]
         self.comm_overheads = [0,0,0]
 
+        self.obs = np.zeros((self.num_agents, self.observation_space))
+        self.state = np.zeros(self.state_space)
+
         #记录上一次的动作
         self.last_participating = [7, 7, 7]
         self.last_cpu_freq = [1.5, 1.5, 1.5]
         self.last_quantization_bit = [8, 8, 8]
-        return obs
+        return self.obs
     
     def step(self, actions):
         if self.test:
@@ -55,8 +54,8 @@ class MultiAgentEnv:
             self.state = np.random.randn(self.state_space)
             rewards = np.random.randn(self.num_agents,1)
             done = False
-            return rewards, done
-        actions = actions.cpu().numpy()
+            return rewards, done, [8, 8, 8]
+        actions = actions.cpu().numpy() if type(actions) != np.ndarray else actions
         if self.args.action_is_mix:
             num_participating = [int(actions[id][0])+1 for id in range(self.num_agents)]      
 
@@ -109,11 +108,11 @@ class MultiAgentEnv:
                 cpu_freq[id] = (np.round(samples,3)).tolist()
             
             quantization_bit = [self.last_quantization_bit[id]+change_per_agent[id][2]*2 for id in range(self.num_agents)]
-            #检查quantization_bit是否在合理范围内（3-16）
+            #检查quantization_bit是否在合理范围内（3-24）
             if (self.last_acc[2]) <=0.5:
-                quantization_bit = [min(max(4,quantization_bit[id]),16) for id in range(self.num_agents)]
+                quantization_bit = [min(max(4,quantization_bit[id]),24) for id in range(self.num_agents)]
             else:
-                quantization_bit = [min(max(2,quantization_bit[id]),16) for id in range(self.num_agents)]
+                quantization_bit = [min(max(2,quantization_bit[id]),24) for id in range(self.num_agents)]
             self.last_quantization_bit = quantization_bit[:]
             #采样
             for id in range(self.num_agents):
