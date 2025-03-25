@@ -78,9 +78,6 @@ def fetch_args():
     #不能默认给的参数
     parser.add_argument('--excel_dir', type=str,default=None, help='excel_dir')
 
-
-
-
     # 解析参数
     args = parser.parse_args()
     return args
