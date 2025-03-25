@@ -1,6 +1,7 @@
 import os
 import ssl
 import torch
+import setproctitle
 import torch.multiprocessing as mp
 from control import BasicMac,NoSharedMac
 from env_runner import EpisodeRunner,MultiAgentEnv
@@ -11,6 +12,7 @@ from Learner.Q_learner import Q_Learner
 from Learner.pareto_learner import Pareto_Learner
 from config import fetch_args
 def run_train(args):
+    setproctitle.setproctitle(args.exp_name)
     args.is_test = args.is_test == 1
     #检查是否存在args.logs_dir文件夹，如果不存在则创建
     if not os.path.exists(args.log_dir):
@@ -35,7 +37,7 @@ def run_train(args):
     # 加载ReplayBuffer
     # buffer = ReplayBuffer(scheme, groups, args.buffer_size, args.episode_limit + 1, preprocess=preprocess, device="cpu")
     if args.load_replay_buffer:
-        buffer = ReplayBuffer.load("replay_buffer_new819.pt", scheme, groups, args.episode_limit + 1, preprocess=preprocess,device="cpu")
+        buffer = ReplayBuffer.load(args.replay_buffer_root, scheme, groups, args.episode_limit + 1, preprocess=preprocess,device="cpu")
     else :
         buffer = ReplayBuffer(scheme, groups, args.buffer_size, args.episode_limit + 1, preprocess=preprocess,device="cpu")
 
@@ -61,10 +63,12 @@ def run_train(args):
     episode = 0
     while episode < 1000:
         if args.is_test:
-            episode_batch = runner.run(test_mode=True,excel_dir=args.excel_dir) 
+            runner.run(test_mode=True,excel_dir=args.excel_dir) 
             return 0
-        # buffer.insert_episode_batch(episode_batch)
-        # # buffer.save("replay_buffer_new819.pt")
+        episode_batch = runner.run()
+        buffer.insert_episode_batch(episode_batch)
+        if episode % 10 == 0:
+            buffer.save(args.replay_buffer_root)
         if buffer.can_sample(args.batch_size):           
             batch_sampled = buffer.sample(args.batch_size)
 
@@ -88,13 +92,10 @@ def run_train(args):
 if __name__ == "__main__":
     # Change working directory to script's directory
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
-    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     ssl._create_default_https_context = ssl._create_unverified_context
     mp.set_start_method('spawn')
-    checkpoint_dir = './checkpoint/'
-    figure_dir = './figures/'
-    os.makedirs(checkpoint_dir, exist_ok=True)
-    os.makedirs(figure_dir, exist_ok=True)
-    set_random_seed(127)
+
     args = fetch_args()
+    
     run_train(args)

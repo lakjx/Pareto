@@ -233,8 +233,8 @@ class EpisodeRunner:
             state_std = np.std(self.env.get_state())
             obs_mean = np.mean(self.env.get_obs())
             obs_std = np.std(self.env.get_obs())
-            state_norm = (self.env.get_state() - state_mean) / state_std
-            obs_norm = (self.env.get_obs() - obs_mean) / obs_std
+            state_norm = (self.env.get_state() - state_mean) / (state_std+1e-8)
+            obs_norm = (self.env.get_obs() - obs_mean) / (obs_std + 1e-8)
             pre_transition_data = {
                 "state": [state_norm],
                 "obs": [obs_norm],

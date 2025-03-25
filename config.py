@@ -2,22 +2,24 @@ import argparse
 
 
 def fetch_args():
+    tasks = ['MNIST', 'FashionMNIST', 'CIFAR10', 'QMNIST', 'SVHN']
+    exp_name = f'pac_a{len(tasks)}'
     # 创建一个解析器
     parser = argparse.ArgumentParser(description='Process some integers.')
-    
+    parser.add_argument('--exp_name', type=str, default=exp_name, help='exp_name')
     parser.add_argument('--seed', type=int, default=156862, help='seed')
     #FL
     parser.add_argument('--n_clients', type=int, default=5, help='n_clients')
-    parser.add_argument('--dataset_names',type=list,default=['MNIST', 'FashionMNIST', 'CIFAR10'],help='dataset_names')
+    parser.add_argument('--dataset_names',type=list,default=tasks,help='dataset_names')
     parser.add_argument('--non_iid_level', type=float, default=1, help='non_iid_alpha')
     parser.add_argument('--expectile', type=float, default=0.5, help='expectile')
     #env
-    parser.add_argument('--n_agents', type=int, default=3, help='n_agents')
+    parser.add_argument('--n_agents', type=int, default=len(tasks), help='n_agents')
     parser.add_argument('--n_actions', type=int, default=27, help='n_actions') 
-    parser.add_argument('--obs_dim', type=int, default=12, help='obs_dim')
-    parser.add_argument('--state_dim', type=int, default=14, help='state_dim')
+    parser.add_argument('--obs_dim', type=int, default=9+len(tasks), help='obs_dim')
+    parser.add_argument('--state_dim', type=int, default=2+4*len(tasks), help='state_dim')
     parser.add_argument('--action_is_mix', type=bool, default=False, help='action_is_mix')
-    parser.add_argument('--episode_limit', type=int, default=35, help='episode_limit')
+    parser.add_argument('--episode_limit', type=int, default=15, help='episode_limit')
     parser.add_argument('--buffer_size', type=int, default=1000, help='buffer_size')
 
     parser.add_argument('--agent_output_type', type=str, default='pi_logits', help='agent_output_type')
@@ -30,11 +32,11 @@ def fetch_args():
     parser.add_argument('--add_value_last_step', type=bool, default=True, help='add_value_last_step')
     #PPO
     parser.add_argument('--q_nstep', type=int, default=10, help='q_nstep')
-    parser.add_argument('--ppo_epochs', type=int, default=4, help='ppo_epoch')
+    parser.add_argument('--ppo_epochs', type=int, default=5, help='ppo_epoch')
     parser.add_argument('--ppo_batch_size', type=int, default=32, help='ppo_batch_size')
     parser.add_argument('--ppo_clip_param', type=float, default=0.2, help='ppo_clip_param')
     parser.add_argument('--entropy_coef', type=float, default=0.01, help='entropy_coef')
-    parser.add_argument('--target_update_interval_or_tau', type=int, default=80, help='critic_training_steps')
+    parser.add_argument('--target_update_interval_or_tau', type=int, default=50, help='critic_training_steps')
 
     #MIX
     parser.add_argument('--use_cuda', type=bool, default=True, help='use_cuda')
@@ -68,9 +70,10 @@ def fetch_args():
     parser.add_argument('--save_model_freq', type=int, default=100, help='save_model_freq')
     parser.add_argument('--checkpoint_dir', type=str, default='checkpoint', help='checkpoint_dir')
     
-    parser.add_argument('--save_model_dir', type=str, default='model', help='save_model_dir')
-    parser.add_argument('--log_dir', type=str, default='logs', help='logdir')
-    parser.add_argument('--load_replay_buffer', type=bool, default=True, help='load_replay_buffer')
+    parser.add_argument('--save_model_dir', type=str, default=exp_name, help='save_model_dir')
+    parser.add_argument('--log_dir', type=str, default='logs/pac/'+exp_name, help='logdir')
+    parser.add_argument('--load_replay_buffer', type=bool, default=False, help='load_replay_buffer')
+    parser.add_argument('--replay_buffer_root', type=str, default='buffer_'+exp_name +'.pt', help='replay_buffer_root')
     parser.add_argument('--is_test', type=int, default=0, help='is_test')
     #不能默认给的参数
     parser.add_argument('--excel_dir', type=str,default=None, help='excel_dir')
