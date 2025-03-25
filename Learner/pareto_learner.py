@@ -10,6 +10,23 @@ from utils import RunningMeanStd
 from einops import rearrange, reduce, repeat
 from tensorboardX import SummaryWriter
 
+class OpponentActionPredictor(nn.Module):
+    def __init__(self, input_shape, hidden_dim, n_actions, n_agents):
+        super(OpponentActionPredictor, self).__init__()
+        self.fc1 = nn.Linear(input_shape, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.fc3 = nn.Linear(hidden_dim, n_actions * (n_agents - 1))
+
+        self.n_agents = n_agents
+        self.n_actions = n_actions
+    def forward(self, inputs):
+        x = F.relu(self.fc1(inputs))
+        x = F.relu(self.fc2(x))
+        logits = self.fc3(x)
+        logits = logits.view(*logits.shape[:-1], self.n_agents-1, self.n_actions)
+
+        return F.softmax(logits, dim=-1)
+        
 class MLP(nn.Module):
     def __init__(self, input_shape, hidden_dim, output_dim):
         super(MLP, self).__init__()
@@ -25,7 +42,6 @@ class MLP(nn.Module):
 class PACCriticNS(nn.Module):
     def __init__(self, scheme, args):
         super(PACCriticNS, self).__init__()
-
         self.args = args
         self.n_actions = args.n_actions
         self.n_agents = args.n_agents
@@ -38,16 +54,50 @@ class PACCriticNS(nn.Module):
 
         self.device = "cuda" if args.use_cuda else "cpu"
 
-    def forward(self, batch, t=None, compute_all=False):
-        if compute_all:
-            inputs, bs, max_t, other_actions = self._build_inputs_all(batch, t=t)
+        if args.pac_continue :
+            self.oppo_pred = OpponentActionPredictor(
+                input_shape=args.state_dim,
+                hidden_dim=args.hidden_dim,
+                n_actions=args.n_actions,
+                n_agents=args.n_agents
+            )
+            self.oppo_pred.to(self.device)
+    def forward(self, batch, t=None, compute_all=False, pac_continue=False):
+        if not pac_continue:
+            if compute_all:
+                inputs, bs, max_t, other_actions = self._build_inputs_all(batch, t=t)
+            else:
+                inputs, bs, max_t, other_actions = self._build_inputs_cur(batch, t=t)
         else:
-            inputs, bs, max_t, other_actions = self._build_inputs_cur(batch, t=t)
+            inputs = []
+            inputs.append(batch["state"].unsqueeze(2).repeat(1, 1, self.n_agents, 1))
+            other_actions = self._pred_opponent_actions(batch, t=t)
+            
+            inputs.append(other_actions)
+            inputs = th.cat(inputs, dim=-1)
+        
         qs = []
         for i in range(self.n_agents):
             q = self.critics[i](inputs[:, :, i]).unsqueeze(2)
             qs.append(q)
         return th.cat(qs, dim=2), other_actions
+
+    def _pred_opponent_actions(self, batch, t=None):
+        bs = batch.batch_size
+        max_t = batch.max_seq_length if t is None else 1
+        ts = slice(None) if t is None else slice(t, t+1)
+
+        inputs = []
+        inputs.append(batch["state"][:, ts].unsqueeze(2).repeat(1, 1, self.n_agents, 1))
+        inputs = th.cat(inputs, dim=-1)
+        other_action_probs = self.oppo_pred(inputs)
+        other_action_indices = th.distributions.Categorical(probs=other_action_probs).sample()
+
+        #One-Hot transform
+        other_actions = th.zeros_like(other_action_probs)
+        other_actions.scatter_(-1, other_action_indices.unsqueeze(-1), 1)
+        
+        return other_actions.view(bs, max_t, self.n_agents, -1)
 
     def _gen_all_other_actions(self, batch, bs, max_t):
 
@@ -279,8 +329,11 @@ class Pareto_Learner:
     def train_critic(self, critic, target_critic, batch, rewards, mask):
         actions = batch["actions"]
         with th.no_grad():
-            target_qvals = target_critic(batch, compute_all=True)[0][:, :-1]
-            target_qvals = target_qvals.max(dim=3)[0]
+            if hasattr(target_critic,'oppo_pred'):
+                target_qvals, other_actions = target_critic(batch, pac_continue=True)
+            else:
+                target_qvals = target_critic(batch, compute_all=True)[0][:, :-1]
+                target_qvals = target_qvals.max(dim=3)[0]
            
         target_qvals = th.gather(target_qvals, -1, actions[:, :-1]).squeeze(-1)
 
@@ -299,7 +352,7 @@ class Pareto_Learner:
             running_log["target_reward{}".format(id_+1)] = []
 
         actions = batch["actions"][:, :-1]
-        q = critic(batch)[0][:, :-1]
+        q = critic(batch,pac_continue = True)[0][:, :-1] # if hasattr(target_critic,'oppo_pred') else critic(batch)[0][:, :-1]
         v = self.state_value(batch)[:, :-1].squeeze(-1)
 
         q_current = th.gather(q, -1, actions).squeeze(-1)
@@ -314,12 +367,48 @@ class Pareto_Learner:
         loss += self.expectile_loss(mask_td_error_v, self.args.expectile).sum() / mask.sum()
 
         # compute the maximum Q-value and the joint action of the other agents that results in this Q-value
-        q_all = critic(batch, compute_all=True)[0][:, :-1]
-        q_all = q_all.max(dim=3)[0]
+        if hasattr(critic,'oppo_pred'):
+            q_all = critic(batch, pac_continue=True)[0][:, :-1]
+        else:
+            q_all = critic(batch, compute_all=True)[0][:, :-1]
+            q_all = q_all.max(dim=3)[0]
         
         q_all = th.gather(q_all, -1, actions).squeeze(-1)
 
         advantage = q_all.detach() - v.detach()
+
+        #加入动作预测的损失
+        if hasattr(critic,'oppo_pred'):
+            # other_actions = other_actions[:, :-1]
+            other_actions_probs = critic.oppo_pred(batch["state"][:, :-1].unsqueeze(2).repeat(1, 1, self.n_agents, 1))
+            
+            actual_action_indices = []
+            for id_ in range(self.n_agents):
+                other_agents = [j for j in range(self.n_agents) if j != id_]
+                agent_indices = []
+                for j, other_id in enumerate(other_agents):
+                    # 获取其他智能体的实际动作索引
+                    indices = batch["actions"][:, :-1, other_id]
+                    agent_indices.append(indices)
+                actual_action_indices.append(th.stack(agent_indices, dim=-1))
+            actual_action_indices = th.stack(actual_action_indices, dim=2).squeeze(3)  # [bs, max_t-1, n_agents, n_agents-1]
+
+            # actual_actions = batch["actions_onehot"][:, :-1].view(batch.batch_size, batch.max_seq_length-1,self.n_agents, -1)
+            # # 通过actual_actions转化得到真实的actual_other_actions
+            # actual_other_actions = []
+            # for id_ in range(self.n_agents):
+            #     single_actual_other_actions = th.cat([actual_actions[:, :, j, :] for j in range(self.n_agents) if j != id_], dim=-1) 
+            #     actual_other_actions.append(single_actual_other_actions)
+            # actual_other_actions = th.stack(actual_other_actions, dim=2)
+            
+            pre_action_loss = 0
+            for id_ in range(self.n_agents):
+                for j in range(self.n_agents-1):
+                    pred = other_actions_probs[:, :, id_, j]
+                    target = actual_action_indices[:, :, id_, j]
+                    pre_action_loss += F.cross_entropy(pred.reshape(-1, self.n_actions), target.reshape(-1))
+            pre_action_loss /= (self.n_agents * (self.n_agents-1))
+            loss += 0.45 * pre_action_loss
 
         self.critic_optimiser.zero_grad()
         loss.backward()

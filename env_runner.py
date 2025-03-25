@@ -30,7 +30,9 @@ class MultiAgentEnv:
         
     def reset(self):
         if self.test:
-            return np.random.randn(self.num_agents, self.observation_space)
+            self.obs = np.zeros((self.num_agents, self.observation_space))
+            self.state = np.zeros(self.state_space)
+            return self.obs
 
         self.FL_env = [FLServer(self.args.n_clients,dataset_name,self.args.non_iid_level) for dataset_name in self.args.dataset_names]
 

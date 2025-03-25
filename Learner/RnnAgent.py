@@ -168,5 +168,5 @@ class SoftPoliciesSelector():
 
     def select_action(self, agent_inputs, test_mode=False):
         m = Categorical(agent_inputs)
-        picked_actions = m.sample().long()
+        picked_actions = m.sample().long() if not test_mode else m.probs.argmax(dim=-1).long()
         return picked_actions
