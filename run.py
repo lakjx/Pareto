@@ -37,7 +37,7 @@ def run_train(args):
     # 加载ReplayBuffer
     # buffer = ReplayBuffer(scheme, groups, args.buffer_size, args.episode_limit + 1, preprocess=preprocess, device="cpu")
     if args.load_replay_buffer:
-        buffer = ReplayBuffer.load('buffer_pac_a5.pt', scheme, groups, args.episode_limit + 1, preprocess=preprocess,device="cpu")
+        buffer = ReplayBuffer.load(args.replay_buffer_root, scheme, groups, args.episode_limit + 1, preprocess=preprocess,device="cpu")
     else :
         buffer = ReplayBuffer(scheme, groups, args.buffer_size, args.episode_limit + 1, preprocess=preprocess,device="cpu")
 
@@ -62,28 +62,28 @@ def run_train(args):
     #Run training
     episode = 0
     while episode < 1000:
-        # if args.is_test:
-        #     runner.run(test_mode=True,excel_dir=args.excel_dir) 
-        #     return 0
-        # episode_batch = runner.run()
-        # buffer.insert_episode_batch(episode_batch)
-        # if episode % 50 == 0:
-        #     buffer.save(args.replay_buffer_root)
-        if buffer.can_sample(args.batch_size):           
-            batch_sampled = buffer.sample(args.batch_size)
+        if args.is_test:
+            runner.run(test_mode=True,excel_dir=args.excel_dir) 
+            return 0
+        episode_batch = runner.run()
+        buffer.insert_episode_batch(episode_batch)
+        if episode % 50 == 0 and episode > 0:
+            buffer.save(args.replay_buffer_root)
+        # if buffer.can_sample(args.batch_size):           
+        #     batch_sampled = buffer.sample(args.batch_size)
 
-            # Truncate batch to only filled timesteps
-            max_ep_t = batch_sampled.max_t_filled()
-            batch_sampled = batch_sampled[:, :max_ep_t]
+        #     # Truncate batch to only filled timesteps
+        #     max_ep_t = batch_sampled.max_t_filled()
+        #     batch_sampled = batch_sampled[:, :max_ep_t]
 
-            if batch_sampled.device != 'cuda':
-                batch_sampled.to('cuda')
+        #     if batch_sampled.device != 'cuda':
+        #         batch_sampled.to('cuda')
             
-            Learner.train(batch_sampled)
-            Learner.save_models(save_model_dir)
-            episode += 1
-        else:
-            continue
+        #     Learner.train(batch_sampled)
+        #     Learner.save_models(save_model_dir)
+        #     episode += 1
+        # else:
+        #     continue
     # buffer.save("replay_buffer.pt")
     #保存模型
     # Learner.save_models(save_model_dir)

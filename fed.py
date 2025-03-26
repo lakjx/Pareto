@@ -171,8 +171,8 @@ class FLClient(nn.Module):
                     correct += (predicted == target).sum().item()
                 losses.append(epoch_loss / len(dataloader))
                 accuracies.append(correct / len(dataloader.dataset))
-                print(f"Client ID: {self.client_id}, Local Epochs: {epoch+1}/{epochs}")
-                print(f"Client Loss: {losses[-1]}, Client Accuracy: {accuracies[-1]}")
+                # print(f"Client ID: {self.client_id}, Local Epochs: {epoch+1}/{epochs}")
+                # print(f"Client Loss: {losses[-1]}, Client Accuracy: {accuracies[-1]}")
             
             #计算本地计算时延
             self.local_computation_delay = self.calculate_local_computation_delay(self.datasetsize_Byte, epochs)
@@ -182,7 +182,7 @@ class FLClient(nn.Module):
             self.upload_delay = self.calculate_upload_delay(bandwidth)
             #计算上传能耗
             self.upload_energy = self.calculate_upload_energy(self.upload_delay)
-            
+            print(f"Client ID: {self.client_id},Client Loss: {losses[-1]}, Client Accuracy: {accuracies[-1]}, Local Computation Delay: {self.local_computation_delay}, Local Computation Energy: {self.local_computation_energy}")
             return losses, accuracies
 
 # 定义联邦学习服务器
@@ -199,22 +199,22 @@ class FLServer:
         self.energy_consume = []
         self.com_overheads = []
         if dataset_names == 'MNIST':
-            self.dataset = datasets.MNIST('./data', train=True, download=True, transform=transforms.ToTensor())
+            self.dataset = datasets.MNIST('./pareto_exp/data', train=True, download=True, transform=transforms.ToTensor())
         elif dataset_names == 'FashionMNIST':
-            self.dataset = datasets.FashionMNIST('./data', train=True, download=True, transform=transforms.ToTensor())
+            self.dataset = datasets.FashionMNIST('./pareto_exp/data', train=True, download=True, transform=transforms.ToTensor())
         elif dataset_names == 'CIFAR10':
             transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=[0.4914, 0.4822, 0.4465], std=[0.2023, 0.1994, 0.2010])])
-            self.dataset = datasets.CIFAR10('./data', train=True, download=True, transform=transform)
+            self.dataset = datasets.CIFAR10('./pareto_exp/data', train=True, download=True, transform=transform)
         elif dataset_names == 'QMNIST':
             transform = transforms.Compose([transforms.ToTensor(),transforms.Normalize((0.1307,), (0.3081,))])
-            self.dataset = datasets.QMNIST('./data', what='train', compat=True, download=True, transform=transform)
+            self.dataset = datasets.QMNIST('./pareto_exp/data', what='train', compat=True, download=True, transform=transform)
         elif dataset_names == 'SVHN':
             transform = transforms.Compose([transforms.ToTensor(),transforms.Normalize((0.1307,), (0.3081,))])
-            self.dataset = datasets.SVHN('./data', split='train', download=True, transform=transform)
+            self.dataset = datasets.SVHN('./pareto_exp/data', split='train', download=True, transform=transform)
         print(f"Distribution of the dataset:{dataset_names}..................................")
         self.distribute_data(non_iid_level=Noniid_level)
         if reload:
-            self.global_model.load_state_dict(torch.load(f'./checkpoint/global_model_{dataset_names}.pth'))
+            self.global_model.load_state_dict(torch.load(f'./pareto_exp/checkpoint/global_model_{dataset_names}.pth'))
     # def distribute_data(self, non_iid_level=0.3):
     #     """将数据集以 non-iid 方式分配给客户端。"""
 
@@ -382,18 +382,18 @@ class FLServer:
     def evaluate_global_model(self,global_model,device):
                 # 加载测试集
             if self.global_model.dataset_name == 'MNIST':
-                test_dataset = datasets.MNIST('./data', train=False, download=True, transform=transforms.ToTensor())
+                test_dataset = datasets.MNIST('./pareto_exp/data', train=False, download=True, transform=transforms.ToTensor())
             elif self.global_model.dataset_name == 'FashionMNIST':
-                test_dataset = datasets.FashionMNIST('./data', train=False, download=True, transform=transforms.ToTensor())
+                test_dataset = datasets.FashionMNIST('./pareto_exp/data', train=False, download=True, transform=transforms.ToTensor())
             elif self.global_model.dataset_name == 'CIFAR10':
                 transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=[0.4914, 0.4822, 0.4465], std=[0.2023, 0.1994, 0.2010])])
-                test_dataset = datasets.CIFAR10('./data', train=False, download=True, transform=transform)
+                test_dataset = datasets.CIFAR10('./pareto_exp/data', train=False, download=True, transform=transform)
             elif self.global_model.dataset_name == 'QMNIST':
                 transform = transforms.Compose([transforms.ToTensor(),transforms.Normalize((0.1307,), (0.3081,))])
-                test_dataset = datasets.QMNIST('./data', what='test', compat=True, download=True, transform=transform)
+                test_dataset = datasets.QMNIST('./pareto_exp/data', what='test', compat=True, download=True, transform=transform)
             elif self.global_model.dataset_name == 'SVHN':
                 transform = transforms.Compose([transforms.ToTensor(),transforms.Normalize((0.1307,), (0.3081,))])
-                test_dataset = datasets.SVHN('./data', split='test', download=True, transform=transform)
+                test_dataset = datasets.SVHN('./pareto_exp/data', split='test', download=True, transform=transform)
 
             global_model.to(device)
             global_model.eval()
@@ -557,7 +557,7 @@ if __name__ == '__main__':
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     FL_env = [FLServer(5, dataset_name,client=FLClient,Noniid_level=0.9) for dataset_name in dataset_names]
     # FL_env = [FLServer(5, dataset_name,client=FLClient_FedDQ,Noniid_level=0.5) for dataset_name in dataset_names]
-    sav_dir = './results/non_iid/Fedavgfix32_9/'
+    sav_dir = './pareto_exp/results/non_iid/Fedavgfix32_9/'
     for id in range(len(dataset_names)):
         FL_env[id].train(40,3,3,256,quantization_bit[id],cpu_freq[id],BW[id])
         FL_env[id].save_metrics_to_excel(sav_dir)

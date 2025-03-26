@@ -4,6 +4,8 @@ import pickle
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
+import setproctitle
+
 from torch.utils.tensorboard import SummaryWriter
 from collections import deque
 from types import SimpleNamespace
@@ -71,7 +73,7 @@ class MAPPO:
         self.ppo_clip = args.clip_epsilon
         self.epochs = args.ppo_epochs
 
-        self.writer = SummaryWriter(f'logs/mappo/{args.env_name}')
+        self.writer = SummaryWriter(f'./pareto_exp/logs/mappo/{args.env_name}')
 
     def get_actions(self, obs,deterministic=False):
         """为所有智能体生成动作"""
@@ -281,7 +283,7 @@ class MAPPO:
             # 更新状态
             obs = next_obs
         for id_ in range(self.num_agents):
-            self.env.FL_envs[id_].save_metrics_to_excel('results/mappo/')
+            self.env.FL_envs[id_].save_metrics_to_excel('./pareto_exp/results/mappo/')
 
     def pure_train(self,buff_dir):
         self.load_buffer(buff_dir)
@@ -354,9 +356,9 @@ class MAPPO:
 
 
 def get_args():
-    # tasks = ['MNIST', 'FashionMNIST', 'CIFAR10', 'QMNIST', 'SVHN']
-    tasks = ['MNIST', 'FashionMNIST','QMNIST', 'SVHN']
-    env_name = 'mappo_a4'
+    tasks = ['MNIST', 'FashionMNIST', 'CIFAR10', 'QMNIST', 'SVHN']
+    # tasks = ['MNIST', 'FashionMNIST','QMNIST', 'SVHN']
+    env_name = f'mappo_a{len(tasks)}'
     
     dict = {
         'n_agents': len(tasks),
@@ -370,7 +372,7 @@ def get_args():
         'gae_lambda': 0.95,
         'ppo_epochs': 10,
         'clip_epsilon': 0.2,
-        'batch_size': 64,
+        'batch_size': 128,
         'buffer_size': 4096,
         'num_episodes': 1000,
         'episode_limit': 15,
@@ -379,8 +381,8 @@ def get_args():
         'n_clients': 5,
         'non_iid_level': 1,
         
-        'model_save_dir': 'checkpoint/'+env_name+'/',
-        'buffer_save_dir': 'buffer'+env_name,
+        'model_save_dir': './pareto_exp/checkpoint/'+env_name+'/',
+        'buffer_save_dir': './pareto_exp/buffer'+env_name,
         'env_name': env_name,
     }
     dict
@@ -389,7 +391,9 @@ def get_args():
 
 if __name__ == '__main__':
     args = get_args()
+    setproctitle.setproctitle(args.env_name)
     env = MultiAgentEnv(args)
     agent = MAPPO(env, args)
+    agent.load_buffer(args.buffer_save_dir)
     # agent.pure_train('mappobuffer_debug.pkl')
     agent.train()
