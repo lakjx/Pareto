@@ -27,7 +27,23 @@ class MultiAgentEnv:
                              (1, 1, 0), (1, 0, -1), (1, -1, 0), (0, 1, 0), (-1, 1, 0), (1, -1, -1), (-1, 0, -1),(-1, -1, 1), (-1, 0, 0),
                              (1, 1, -1), (0, 1, -1), (0, 0, -1), (0, 1, 1), (-1, 1, 1), (1, 0, 0), (-1, 1, -1), (0, -1, 1), (1, 1, 1)]
 
+        # 新增：直接动作值定义（三等分）
+        self.participating_values = self._create_discrete_values(2, args.n_clients, 3)
+        self.cpu_freq_values = self._create_discrete_values(0.5, 3.5, 3)
+        self.quantization_bit_values = self._create_discrete_values(2, 32, 3)
         
+        # 创建所有可能的动作组合
+        self.direct_action_combinations = list(itertools.product(
+            range(3),  # participating的3个选择
+            range(3),  # cpu_freq的3个选择  
+            range(3)   # quantization_bit的3个选择
+        ))
+    def _create_discrete_values(self, min_val, max_val, num_divisions):
+        """创建离散化的动作值"""
+        if num_divisions == 1:
+            return [(min_val + max_val) / 2]
+        step = (max_val - min_val) / (num_divisions - 1)
+        return [round(min_val + i * step, 2) for i in range(num_divisions)]
     def reset(self):
         if self.test:
             self.obs = np.zeros((self.num_agents, self.observation_space))
@@ -84,6 +100,48 @@ class MultiAgentEnv:
             total = sum(BW)
             if total > 30:
                 BW = [np.round(30* (i / total),2) for i in BW]
+        elif self.args.use_direct_actions:
+            # 新增：直接动作选择方式
+            local_epochs = [3] * self.num_agents
+            batch_size = [256] * self.num_agents
+            
+            num_participating = []
+            cpu_freq = []
+            quantization_bit = []
+            
+            for id in range(self.num_agents):
+                action_idx = int(actions[id])
+                if action_idx >= len(self.direct_action_combinations):
+                    action_idx = 0  # 防止越界
+                    
+                participating_idx, cpu_idx, quant_idx = self.direct_action_combinations[action_idx]
+                
+                # 直接使用离散化的值
+                num_participating.append(int(self.participating_values[participating_idx]))
+                
+                # CPU频率采样（围绕选定值）
+                cpu_base = self.cpu_freq_values[cpu_idx]
+                samples = np.random.normal(loc=cpu_base, scale=0.2, size=self.args.n_clients)
+                while np.any(samples < 0):
+                    samples[samples < 0] = np.random.normal(loc=cpu_base, scale=0.2, size=np.sum(samples < 0))
+                cpu_freq.append((np.round(samples, 3)).tolist())
+                
+                # 量化位数采样（围绕选定值）
+                quant_base = self.quantization_bit_values[quant_idx]
+                samples = np.random.normal(loc=quant_base, scale=0.15, size=self.args.n_clients)
+                samples = np.round(samples)
+                while np.any(samples <= 0):
+                    samples[samples <= 0] = np.random.normal(loc=quant_base, scale=0.15, size=np.sum(samples <= 0))
+                    samples = np.round(samples)
+                quantization_bit.append(samples.tolist())
+            
+            # BW分配基于量化位数
+            BW_origin = [self.quantization_bit_values[self.direct_action_combinations[int(actions[id])][2]] for id in range(self.num_agents)]
+            total = sum(BW_origin)
+            BW = [np.round(30 * (i / total), 2) for i in BW_origin]
+            
+            print(f"Direct actions - Participating: {num_participating}, CPU: {[self.cpu_freq_values[self.direct_action_combinations[int(actions[id])][1]] for id in range(self.num_agents)]}, Quant: {[self.quantization_bit_values[self.direct_action_combinations[int(actions[id])][2]] for id in range(self.num_agents)]}")
+
         else:           
             local_epochs = [3] * self.num_agents  # 动态创建列表
             batch_size = [256] * self.num_agents  # 动态创建列表
@@ -153,8 +211,17 @@ class MultiAgentEnv:
 
             self.delay_lst[server_id].append(server_outputs2[-2])
             self.energy_lst[server_id].append(server_outputs2[-1])
-            rwd_pre.append(-5*server_outputs2[-2]/max(self.delay_lst[server_id]) 
-                           - 5*server_outputs2[-1]/max(self.energy_lst[server_id]))
+            
+            # 避免除零错误，使用安全的除法
+            max_delay = max(self.delay_lst[server_id]) if self.delay_lst[server_id] else 1.0
+            max_energy = max(self.energy_lst[server_id]) if self.energy_lst[server_id] else 1.0
+            
+            # 确保分母不为零
+            max_delay = max(max_delay, 1e-8)
+            max_energy = max(max_energy, 1e-8)
+            
+            rwd_pre.append(-5*server_outputs2[-2]/max_delay 
+                           - 5*server_outputs2[-1]/max_energy)
 
             state_loss.append(server_outputs2[2])
             state_acc.append(server_outputs2[3])
@@ -269,7 +336,7 @@ class EpisodeRunner:
             self.t += 1
         if test_mode:
             for server_id in range(self.env.num_agents):
-                self.env.FL_env[server_id].save_metrics_to_excel(excel_dir,origin_band)
+                self.env.FL_env[server_id].save_metrics_to_excel(excel_dir)
         return self.batch
     
 

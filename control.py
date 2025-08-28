@@ -1,6 +1,6 @@
 import torch as th
 from Learner.RnnAgent import RnnAgent, EpsilonGreedyActionSelector, NoSharedRnnAgent,SoftPoliciesSelector
-
+import time
 class BasicMac:
     def __init__(self, args,scheme):
         self.n_agents = args.n_agents
@@ -87,7 +87,9 @@ class NoSharedMac:
 
     def select_actions(self, ep_batch, t_ep, bs=slice(None), test_mode=False):
         avail_actions = th.ones(ep_batch.batch_size, self.n_agents, self.args.n_actions).to(ep_batch.device)
+        t0 = time.time()
         agent_outputs = self.forward(ep_batch, t_ep)
+        print("forward time:", time.time() - t0)
         if self.args.action_is_mix:
             # 分离离散动作和连续动作
             discrete_logits = agent_outputs[..., :self.dis_dim]
@@ -169,3 +171,36 @@ class NoSharedMac:
 
         inputs = th.cat([x.reshape(bs*self.n_agents, -1) for x in inputs], dim=1)
         return inputs
+    def get_flops(self):
+        """计算MAC网络的FLOPs"""
+        from ptflops import get_model_complexity_info
+         # 创建一个包装器类来处理RnnAgent的特殊forward方法
+        class AgentFLOPsWrapper(th.nn.Module):
+            def __init__(self, agent, hidden_dim):
+                super(AgentFLOPsWrapper, self).__init__()
+                self.agent = agent
+                self.hidden_dim = hidden_dim
+                
+            def forward(self, x):
+                # 创建一个假的隐藏状态
+                batch_size = x.size(0)
+                hidden_state = th.zeros(batch_size, self.hidden_dim, device=x.device)
+                # 调用原始forward方法
+                out, _ = self.agent(x, hidden_state)
+                return out
+        total_macs = 0
+        total_params = 0
+        
+        # 假设self.agents是包含所有智能体网络的列表
+        for agent in self.agent.agents:
+            wrapped_agent = AgentFLOPsWrapper(agent, 64)
+            # 假设每个智能体网络接收的输入形状为input_shape
+            input_shape = self.agent.input_shape  # 这需要根据实际情况调整
+            macs, params = get_model_complexity_info(
+                wrapped_agent, (input_shape,),
+                as_strings=False, print_per_layer_stat=False, verbose=False
+            )
+            total_macs += macs
+            total_params += params
+        
+        return total_macs, total_params

@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 import setproctitle
+import time
 
 from torch.utils.tensorboard import SummaryWriter
 from collections import deque
@@ -20,6 +21,15 @@ class MultiAgentActor(nn.Module):
             nn.ReLU()
         )
         self.action_head = nn.Linear(64, action_dim)
+        
+        # 权重初始化
+        self._init_weights()
+    
+    def _init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.orthogonal_(m.weight, gain=0.5)
+                nn.init.constant_(m.bias, 0)
     
     def forward(self, obs):
         # obs形状: (batch_size, num_agents, obs_dim) 或 (num_agents, obs_dim)
@@ -29,6 +39,9 @@ class MultiAgentActor(nn.Module):
         
         features = self.shared_net(obs)
         logits = self.action_head(features)
+        
+        # 裁剪 logits 避免数值不稳定
+        logits = torch.clamp(logits, min=-10, max=10)
         
         if len(original_shape) > 2:
             logits = logits.view(*original_shape[:-1], -1)  # 恢复原始形状
@@ -44,6 +57,15 @@ class CentralizedCritic(nn.Module):
             nn.ReLU(),
             nn.Linear(64, 1)
         )
+        
+        # 权重初始化
+        self._init_weights()
+    
+    def _init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.orthogonal_(m.weight, gain=1.0)
+                nn.init.constant_(m.bias, 0)
     
     def forward(self, states):
         # states形状: (batch_size, state_dim)
@@ -64,6 +86,9 @@ class MAPPO:
         self.actor_optim = optim.Adam(self.actor.parameters(), lr=args.actor_lr)
         self.critic_optim = optim.Adam(self.critic.parameters(), lr=args.critic_lr)
         
+        # 梯度裁剪参数
+        self.max_grad_norm = 0.5
+        
         # 经验缓冲区
         self.buffer = deque(maxlen=args.buffer_size)
         
@@ -80,11 +105,22 @@ class MAPPO:
         # obs形状: (num_agents, obs_dim)
         with torch.no_grad():
             obs_tensor = torch.FloatTensor(obs).to(self.device)
+            
+            # 检查输入是否包含 NaN 或 Inf
+            if torch.isnan(obs_tensor).any() or torch.isinf(obs_tensor).any():
+                print("Warning: NaN or Inf detected in observations, replacing with zeros")
+                obs_tensor = torch.nan_to_num(obs_tensor, nan=0.0, posinf=1.0, neginf=-1.0)
+            
             logits = self.actor(obs_tensor)  # (num_agents, action_dim)
+            
+            # 检查 logits 是否包含 NaN 或 Inf
+            if torch.isnan(logits).any() or torch.isinf(logits).any():
+                print("Warning: NaN or Inf detected in logits, replacing with zeros")
+                logits = torch.nan_to_num(logits, nan=0.0, posinf=10.0, neginf=-10.0)
         
         dists = [torch.distributions.Categorical(logits=logit) for logit in logits]
         if deterministic:
-            actions = [dist.probs.argmax().item() for dist in dists]
+            actions = [dist.probs.argmax() for dist in dists]
         else:
             actions = [dist.sample() for dist in dists]
         log_probs = torch.stack([dists[i].log_prob(actions[i]) for i in range(self.num_agents)])
@@ -196,10 +232,12 @@ class MAPPO:
                 # 参数更新
                 self.actor_optim.zero_grad()
                 actor_loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
                 self.actor_optim.step()
                 
                 self.critic_optim.zero_grad()
                 critic_loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.critic.parameters(), self.max_grad_norm)
                 self.critic_optim.step()
 
                 epoch_actor_loss += actor_loss.item()
@@ -265,7 +303,7 @@ class MAPPO:
                 self.save_model(self.args.model_save_dir)
         self.writer.close()
     
-    def test(self,load_dir):
+    def test(self,load_dir,sav_dir):
         self.load_model(load_dir)
         obs = self.env.reset()
         done = False
@@ -283,15 +321,17 @@ class MAPPO:
             # 更新状态
             obs = next_obs
         for id_ in range(self.num_agents):
-            self.env.FL_envs[id_].save_metrics_to_excel('./pareto_exp/results/mappo/')
+            self.env.FL_env[id_].save_metrics_to_excel(sav_dir)
 
     def pure_train(self,buff_dir):
         self.load_buffer(buff_dir)
         for episode in range(self.args.num_episodes):
+            t0 = time.time()
             print(f'----------------Episode {episode}---------------------')
             self.episode = episode
             
             self.update()
+            print(f"Episode time: {time.time()-t0}")
         self.save_model(self.args.model_save_dir)
 
 
@@ -329,16 +369,17 @@ class MAPPO:
         with open(filename, 'wb') as f:
             pickle.dump(serializable_buffer, f)
         print(f"Saved buffer with {len(buffer_list)} experiences to {filename}")
-    def load_buffer(self,filename):
-        """从文件加载缓冲区"""
-        filename = filename or self.buffer_path
-        if not os.path.exists(filename):
-            print(f"No buffer file found at {filename}")
-            return
-        
-        with open(filename, 'rb') as f:
-            serializable_buffer = pickle.load(f)
-        
+    def load_buffer(self,filename_lst):
+        serializable_buffer = []
+        for filename in filename_lst:   
+            """从文件加载缓冲区"""
+            if not os.path.exists(filename):
+                print(f"No buffer file found at {filename}")
+                return
+    
+            with open(filename, 'rb') as f:
+                buf = pickle.load(f)
+                serializable_buffer.extend(buf) 
         # 转换回numpy格式
         self.buffer.clear()
         for exp in serializable_buffer:
@@ -352,13 +393,16 @@ class MAPPO:
                 'done': exp['done']
             }
             self.buffer.append(restored_exp)
-        print(f"Loaded {len(self.buffer)} experiences from {filename}")
+        print(f"Loaded {len(self.buffer)} experiences from {filename_lst}")
 
 
 def get_args():
-    tasks = ['MNIST', 'FashionMNIST', 'CIFAR10', 'QMNIST', 'SVHN']
+    # tasks = ['MNIST', 'FashionMNIST', 'CIFAR10', 'QMNIST', 'SVHN']
     # tasks = ['MNIST', 'FashionMNIST','QMNIST', 'SVHN']
-    env_name = f'mappo_a{len(tasks)}'
+    tasks = ['WikiText2','MNIST', 'FashionMNIST']
+    # tasks = ['MNIST', 'FashionMNIST']
+    # env_name = f'mappo_a{len(tasks)}'
+    env_name = f'mappo_wikitext2'
     
     dict = {
         'n_agents': len(tasks),
@@ -372,16 +416,16 @@ def get_args():
         'gae_lambda': 0.95,
         'ppo_epochs': 10,
         'clip_epsilon': 0.2,
-        'batch_size': 128,
-        'buffer_size': 4096,
-        'num_episodes': 1000,
+        'batch_size': 512,
+        'buffer_size': 200000,
+        'num_episodes': 500,
         'episode_limit': 15,
 
         'dataset_names': tasks,
         'n_clients': 5,
         'non_iid_level': 1,
-        
-        'model_save_dir': './pareto_exp/checkpoint/'+env_name+'/',
+        'use_direct_actions': False,
+        'model_save_dir': './pareto_exp/checkpoint/'+env_name,
         'buffer_save_dir': './pareto_exp/buffer'+env_name,
         'env_name': env_name,
     }
@@ -389,11 +433,24 @@ def get_args():
     return SimpleNamespace(**dict)
 
 
+# if __name__ == '__main__':
+#     args = get_args()
+#     #随机种子
+#     torch.manual_seed(100)
+#     np.random.seed(100)
+#     setproctitle.setproctitle(args.env_name)
+#     env = MultiAgentEnv(args)
+#     agent = MAPPO(env, args)
+#     agent.load_buffer(['pareto_exp/buffermappo_wikitext2.pkl'])
+#     # agent.pure_train(['pareto_exp/mappobuffer_324.pkl'])
+#     agent.train()
+
 if __name__ == '__main__':
     args = get_args()
-    setproctitle.setproctitle(args.env_name)
+    #随机种子
+    torch.manual_seed(100)
+    np.random.seed(100)
+    setproctitle.setproctitle("wikitext")
     env = MultiAgentEnv(args)
     agent = MAPPO(env, args)
-    agent.load_buffer(args.buffer_save_dir)
-    # agent.pure_train('mappobuffer_debug.pkl')
-    agent.train()
+    agent.test("pareto_exp/checkpoint/mappo_wikitext2/ep_100","./pareto_exp/results/wikitext/mappowikitext")

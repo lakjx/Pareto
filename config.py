@@ -2,12 +2,16 @@ import argparse
 
 
 def fetch_args():
-    is_test = 0
-    tasks = ['MNIST', 'FashionMNIST', 'CIFAR10','QMNIST','SVHN']
+    is_test = 1
+    # tasks = ['MNIST', 'FashionMNIST', 'CIFAR10','QMNIST','SVHN']
     # tasks = ['MNIST', 'FashionMNIST','QMNIST','SVHN']
     # tasks = ['MNIST', 'FashionMNIST', 'CIFAR10']
+    tasks = ['WikiText2','MNIST', 'FashionMNIST']
+    # tasks = ['MNIST', 'FashionMNIST']
     # exp_name = f'pac-c_a{len(tasks)}'
-    exp_name = f'pac_a{len(tasks)}'
+    # exp_name = f'pac_a{len(tasks)}'
+    exp_name = f'wikitext_pac'
+    # exp_name = f'tcda_hyperparam'
     # 创建一个解析器
     parser = argparse.ArgumentParser(description='Process some integers.')
     parser.add_argument('--exp_name', type=str, default=exp_name, help='exp_name')
@@ -23,6 +27,8 @@ def fetch_args():
     parser.add_argument('--obs_dim', type=int, default=9+len(tasks), help='obs_dim')
     parser.add_argument('--state_dim', type=int, default=2+4*len(tasks), help='state_dim')
     parser.add_argument('--action_is_mix', type=bool, default=False, help='action_is_mix')
+    parser.add_argument('--use_direct_actions', type=bool, default=True, help='action_is_mix')
+
     if is_test == 1:
         parser.add_argument('--episode_limit', type=int, default=35, help='episode_limit')
     else:
@@ -40,7 +46,7 @@ def fetch_args():
     #PPO
     parser.add_argument('--q_nstep', type=int, default=10, help='q_nstep')
     parser.add_argument('--ppo_epochs', type=int, default=5, help='ppo_epoch')
-    parser.add_argument('--ppo_batch_size', type=int, default=32, help='ppo_batch_size')
+    parser.add_argument('--ppo_batch_size', type=int, default=64, help='ppo_batch_size')
     parser.add_argument('--ppo_clip_param', type=float, default=0.2, help='ppo_clip_param')
     parser.add_argument('--entropy_coef', type=float, default=0.01, help='entropy_coef')
     parser.add_argument('--target_update_interval_or_tau', type=int, default=50, help='critic_training_steps')
@@ -66,7 +72,7 @@ def fetch_args():
 
     #RL
     parser.add_argument('--episode_max_steps', type=int, default=100, help='episode_max_steps')
-    parser.add_argument('--batch_size', type=int, default=16, help='batch_size')
+    parser.add_argument('--batch_size', type=int, default=8, help='batch_size')
     parser.add_argument('--gamma', type=float, default=0.6, help='gamma')
     parser.add_argument('--nstep_return', type=int, default=1, help='nstep_return')
     parser.add_argument('--grad_norm_clip', type=float, default=10, help='grad_norm_clip')
@@ -79,10 +85,13 @@ def fetch_args():
     
     parser.add_argument('--save_model_dir', type=str, default=exp_name, help='save_model_dir')
     parser.add_argument('--log_dir', type=str, default='./pareto_exp/logs/pac/'+exp_name, help='logdir')
-    parser.add_argument('--load_replay_buffer', type=bool, default=True, help='load_replay_buffer')
-    parser.add_argument('--replay_buffer_root', type=str, default='./pareto_exp/buffer_'+exp_name +'.pt', help='replay_buffer_root')
+    if is_test == 0:
+        parser.add_argument('--load_replay_buffer', type=bool, default=True, help='load_replay_buffer')
+    else:
+        parser.add_argument('--load_replay_buffer', type=bool, default=False, help='load_replay_buffer')
+    parser.add_argument('--replay_buffer_root', type=str, default=f'./pareto_exp/'+exp_name +'.pt', help='replay_buffer_root')
     parser.add_argument('--is_test', type=int, default=is_test, help='is_test')
-    parser.add_argument('--excel_dir', type=str,default='./pareto_exp/results/'+exp_name, help='excel_dir')
+    parser.add_argument('--excel_dir', type=str,default='./pareto_exp/results/wikitext/'+exp_name, help='excel_dir')
     parser.add_argument('--pac_continue', type=bool, default=False, help='pac_continue')
 
     # 解析参数

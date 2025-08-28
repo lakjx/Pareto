@@ -3,6 +3,7 @@ import ssl
 import torch
 import setproctitle
 import torch.multiprocessing as mp
+import time
 from control import BasicMac,NoSharedMac
 from env_runner import EpisodeRunner,MultiAgentEnv
 from episode_replaybuffer import ReplayBuffer
@@ -58,44 +59,58 @@ def run_train(args):
         Learner.load_models(save_model_dir)
     if args.use_cuda:
         Learner.cuda()
-    
+    # print_model_flops(Learner)
     #Run training
     episode = 0
     while episode < 1000:
         if args.is_test:
             runner.run(test_mode=True,excel_dir=args.excel_dir) 
             return 0
-        episode_batch = runner.run()
-        buffer.insert_episode_batch(episode_batch)
-        if episode % 50 == 0 and episode > 0:
-            buffer.save(args.replay_buffer_root)
-        # if buffer.can_sample(args.batch_size):           
-        #     batch_sampled = buffer.sample(args.batch_size)
+        # episode_batch = runner.run()
+        # buffer.insert_episode_batch(episode_batch)
+        # if episode % 50 == 0 and episode > 0:
+        #     buffer.save(args.replay_buffer_root)
+        if buffer.can_sample(args.batch_size):           
+            batch_sampled = buffer.sample(args.batch_size)
 
-        #     # Truncate batch to only filled timesteps
-        #     max_ep_t = batch_sampled.max_t_filled()
-        #     batch_sampled = batch_sampled[:, :max_ep_t]
+            # Truncate batch to only filled timesteps
+            max_ep_t = batch_sampled.max_t_filled()
+            batch_sampled = batch_sampled[:, :max_ep_t]
 
-        #     if batch_sampled.device != 'cuda':
-        #         batch_sampled.to('cuda')
-            
-        #     Learner.train(batch_sampled)
-        #     Learner.save_models(save_model_dir)
-        #     episode += 1
-        # else:
-        #     continue
+            if batch_sampled.device != 'cuda':
+                batch_sampled.to('cuda')
+            t0 = time.time()
+            Learner.train(batch_sampled)
+            Learner.save_models(save_model_dir)
+            print(f"Episode training time: {time.time() - t0}s")
+            episode += 1
+        else:
+            continue
     # buffer.save("replay_buffer.pt")
     #保存模型
     # Learner.save_models(save_model_dir)
     print("Training complete")
 
+def print_model_flops(learner):
+    flops_info = learner.get_flops()
+    
+    print(f"=== 模型FLOPs分析 ===")
+    print(f"总FLOPs: {flops_info['total_flops'] / 1e6:.2f} MFLOPs")
+    print(f"总参数量: {flops_info['total_params'] / 1e3:.2f} K")
+    
+    print(f"\n=== 组件详情 ===")
+    print(f"Critic网络: {flops_info['critic_flops'] / 1e9:.2f} GFLOPs, {flops_info['critic_params'] / 1e6:.2f} M参数")
+    print(f"State Value网络: {flops_info['state_value_flops'] / 1e9:.2f} GFLOPs, {flops_info['state_value_params'] / 1e6:.2f} M参数")
+    print(f"对手动作预测器: {flops_info['oppo_pred_flops'] / 1e9:.2f} GFLOPs, {flops_info['oppo_pred_params'] / 1e6:.2f} M参数")
+    print(f"MAC网络: {flops_info['mac_flops'] / 1e9:.2f} GFLOPs, {flops_info['mac_params'] / 1e6:.2f} M参数")
+
 if __name__ == "__main__":
     # Change working directory to script's directory
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
     ssl._create_default_https_context = ssl._create_unverified_context
     mp.set_start_method('spawn')
-
+    set_random_seed(1611)
     args = fetch_args()
     
     run_train(args)

@@ -9,7 +9,7 @@ from Learner.PPO_learner import CentralVCriticNS
 from utils import RunningMeanStd
 from einops import rearrange, reduce, repeat
 from tensorboardX import SummaryWriter
-
+import time
 class OpponentActionPredictor(nn.Module):
     def __init__(self, input_shape, hidden_dim, n_actions, n_agents):
         super(OpponentActionPredictor, self).__init__()
@@ -352,7 +352,7 @@ class Pareto_Learner:
             running_log["target_reward{}".format(id_+1)] = []
 
         actions = batch["actions"][:, :-1]
-        q = critic(batch,pac_continue = True)[0][:, :-1] # if hasattr(target_critic,'oppo_pred') else critic(batch)[0][:, :-1]
+        q = critic(batch,pac_continue = True)[0][:, :-1] if hasattr(target_critic,'oppo_pred') else critic(batch)[0][:, :-1]
         v = self.state_value(batch)[:, :-1].squeeze(-1)
 
         q_current = th.gather(q, -1, actions).squeeze(-1)
@@ -492,7 +492,60 @@ class Pareto_Learner:
     #         th.load("{}/agent_opt.th".format(path), map_location=lambda storage, loc: storage))
     #     self.critic_optimiser.load_state_dict(
     #         th.load("{}/critic_opt.th".format(path), map_location=lambda storage, loc: storage))
-   
+    def get_flops(self):
+        """计算模型的FLOPs"""
+        from ptflops import get_model_complexity_info
+        
+        # 计算critic网络的FLOPs
+        critic_macs = 0
+        critic_params = 0
+        
+        # 为每个智能体的critic计算FLOPs
+        for critic in self.critic.critics:
+            macs, params = get_model_complexity_info(
+                critic, (self.critic._get_input_shape(self.scheme),), 
+                as_strings=False, print_per_layer_stat=False, verbose=False
+            )
+            critic_macs += macs
+            critic_params += params
+            
+        # 计算state value网络的FLOPs
+        state_value_macs = 0
+        state_value_params = 0
+        for state_value in self.state_value.critics:
+            state_value_macs, state_value_params = get_model_complexity_info(
+                state_value, (self.state_value._get_input_shape(self.scheme),),
+                as_strings=False, print_per_layer_stat=False, verbose=False
+            )
+        
+        # 如果有对手动作预测器，计算其FLOPs
+        oppo_pred_macs = 0
+        oppo_pred_params = 0
+        if hasattr(self.critic, 'oppo_pred'):
+            oppo_pred_macs, oppo_pred_params = get_model_complexity_info(
+                self.critic.oppo_pred, (self.args.state_dim,),
+                as_strings=False, print_per_layer_stat=False, verbose=False
+            )
+        
+        # 计算MAC网络的FLOPs (这部分需要根据实际的MAC网络结构来实现)
+        mac_macs, mac_params = self.mac.get_flops()
+        
+        # 汇总FLOPs
+        total_macs = critic_macs + state_value_macs + oppo_pred_macs + mac_macs
+        total_params = critic_params + state_value_params + oppo_pred_params + mac_params
+        
+        return {
+            "total_flops": total_macs * 2,  # 通常1 MAC = 2 FLOPs
+            "total_params": total_params,
+            "critic_flops": critic_macs * 2,
+            "critic_params": critic_params,
+            "state_value_flops": state_value_macs * 2,
+            "state_value_params": state_value_params,
+            "oppo_pred_flops": oppo_pred_macs * 2,
+            "oppo_pred_params": oppo_pred_params,
+            "mac_flops": mac_macs * 2,
+            "mac_params": mac_params
+        }
 def generate_other_actions(n_actions, n_agents, device):
     other_acts = [
         th.cat(x) for x in product(*[th.eye(n_actions, device=device) for _ in range(n_agents - 1)])
