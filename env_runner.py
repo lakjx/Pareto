@@ -21,34 +21,52 @@ class MultiAgentEnv:
         self.args = args
         # self.FL_env = [FLServer(args.n_clients,dataset_name) for dataset_name in args.dataset_names]
 
-        self.combinations = list(itertools.product([-1, 0, 1], repeat=3))
+        self.obs = np.random.randn(self.num_agents, self.observation_space)
+        self.state = np.random.randn(self.state_space)
+
+        self.combinations = list(itertools.product([-1, 0, 1], repeat=4))
         random.shuffle(self.combinations)
         self.combinations = [(-1, -1, 0), (0, 0, 1), (0, 0, 0), (1, -1, 1), (0, -1, 0), (0, -1, -1), (-1, 0, 1), (1, 0, 1),(-1, -1, -1),
                              (1, 1, 0), (1, 0, -1), (1, -1, 0), (0, 1, 0), (-1, 1, 0), (1, -1, -1), (-1, 0, -1),(-1, -1, 1), (-1, 0, 0),
                              (1, 1, -1), (0, 1, -1), (0, 0, -1), (0, 1, 1), (-1, 1, 1), (1, 0, 0), (-1, 1, -1), (0, -1, 1), (1, 1, 1)]
-
+        self.step_sizes = {
+            'n': 1, 
+            'f': 0.5, 
+            'q': 4,   
+            'B': 2     
+        }
+        self.participating_values = self._create_discrete_values(2, args.n_clients, 3)
+        self.cpu_freq_values = self._create_discrete_values(0.5, 3.5, 3)
+        self.quantization_bit_values = self._create_discrete_values(2, 32, 3)
         
+        self.direct_action_combinations = list(itertools.product(
+            range(3),
+            range(3),
+            range(3)  
+        ))
+    def _create_discrete_values(self, min_val, max_val, num_divisions):
+        if num_divisions == 1:
+            return [(min_val + max_val) / 2]
+        step = (max_val - min_val) / (num_divisions - 1)
+        return [round(min_val + i * step, 2) for i in range(num_divisions)]
+
     def reset(self):
         if self.test:
-            self.obs = np.zeros((self.num_agents, self.observation_space))
-            self.state = np.zeros(self.state_space)
-            return self.obs
+            return np.random.randn(self.num_agents, self.observation_space)
 
-        self.FL_env = [FLServer(self.args.n_clients,dataset_name,self.args.non_iid_level) for dataset_name in self.args.dataset_names]
-
-        self.last_acc = [0.0]*self.num_agents
-        self.delay_lst = [[] for _ in range(self.num_agents)]
-        self.energy_lst = [[] for _ in range(self.num_agents)]
-        self.comm_overheads = [0]*self.num_agents
-
-        self.obs = np.zeros((self.num_agents, self.observation_space))
-        self.state = np.zeros(self.state_space)
+        self.FL_env = [FLServer(self.args.n_clients,dataset_name) for dataset_name in self.args.dataset_names]
+        obs = np.random.randn(self.num_agents, self.observation_space)
+        self.last_acc = [0.0, 0.0, 0.0]
+        self.delay_lst = [[],[],[]]
+        self.energy_lst = [[],[],[]]
+        self.comm_overheads = [0,0,0]
 
         #记录上一次的动作
-        self.last_participating = [7] * self.num_agents 
-        self.last_cpu_freq = [1.5] * self.num_agents
-        self.last_quantization_bit = [8] * self.num_agents
-        return self.obs
+        self.last_participating = [7, 7, 7]
+        self.last_cpu_freq = [1.5, 1.5, 1.5]
+        self.last_quantization_bit = [8, 8, 8]
+        self.last_BW = [10.0, 10.0, 10.0]
+        return obs
     
     def step(self, actions):
         if self.test:
@@ -56,13 +74,13 @@ class MultiAgentEnv:
             self.state = np.random.randn(self.state_space)
             rewards = np.random.randn(self.num_agents,1)
             done = False
-            return rewards, done, [8] * self.num_agents
-        actions = actions.cpu().numpy() if type(actions) != np.ndarray else actions
+            return rewards, done
+        actions = actions.cpu().numpy()
         if self.args.action_is_mix:
             num_participating = [int(actions[id][0])+1 for id in range(self.num_agents)]      
 
-            local_epochs = [3] * self.num_agents  # 动态创建列表
-            batch_size = [256] * self.num_agents  # 动态创建列表
+            local_epochs = [3, 3, 3]
+            batch_size = [32, 32, 32]
 
             cpu_freq = []
             for id in range(self.num_agents):
@@ -85,40 +103,34 @@ class MultiAgentEnv:
             if total > 30:
                 BW = [np.round(30* (i / total),2) for i in BW]
         else:           
-            local_epochs = [3] * self.num_agents  # 动态创建列表
-            batch_size = [256] * self.num_agents  # 动态创建列表
+            local_epochs = [3, 3, 3]
+            batch_size = [256, 256, 256]
 
             change_per_agent = [self.combinations[int(actions[id])]for id in range(self.num_agents)]
             print(f"actions_change:{change_per_agent}")
-            num_participating = [self.last_participating[id]+change_per_agent[id][0] for id in range(self.num_agents)]
-            #检查num_participating范围内 e.g. 1-5
-            num_participating = [min(max(2,num_participating[id]),self.args.n_clients) for id in range(self.num_agents)]
-            # if (self.last_acc[2]) <=0.5:
-            #     num_participating = [min(max(3,num_participating[id]),self.args.n_clients) for id in range(self.num_agents)]
-            # else:
-                # num_participating = [min(max(2,num_participating[id]),self.args.n_clients) for id in range(self.num_agents)]
+            num_participating = [self.last_participating[id]+change_per_agent[id][0]* self.step_sizes['n'] for id in range(self.num_agents)]
+
+            if (self.last_acc[2]) <=0.5:
+                num_participating = [min(max(3,num_participating[id]),self.args.n_clients) for id in range(self.num_agents)]
+            else:
+                num_participating = [min(max(2,num_participating[id]),self.args.n_clients) for id in range(self.num_agents)]
             self.last_participating = num_participating
 
-            cpu_freq = [self.last_cpu_freq[id]+change_per_agent[id][1]*0.5 for id in range(self.num_agents)]
-            #检查cpu_freq是否在合理范围内（0.5-3.5）
+            cpu_freq = [self.last_cpu_freq[id]+change_per_agent[id][1]** self.step_sizes['f'] for id in range(self.num_agents)]
             cpu_freq = [min(max(0.5,cpu_freq[id]),3.5) for id in range(self.num_agents)]
             self.last_cpu_freq = cpu_freq[:]
-            #采样
             for id in range(self.num_agents):
                 samples = np.random.normal(loc=cpu_freq[id], scale=0.2, size=self.args.n_clients)
                 while np.any(samples < 0):
                     samples[samples < 0] = np.random.normal(loc=cpu_freq[id], scale=0.2, size=np.sum(samples < 0))
                 cpu_freq[id] = (np.round(samples,3)).tolist()
             
-            quantization_bit = [self.last_quantization_bit[id]+change_per_agent[id][2]*2 for id in range(self.num_agents)]
-            #检查quantization_bit是否在合理范围内 e.g. 2-32
-            quantization_bit = [min(max(2,quantization_bit[id]),32) for id in range(self.num_agents)]
-            # if (self.last_acc[2]) <=0.5:
-            #     quantization_bit = [min(max(4,quantization_bit[id]),24) for id in range(self.num_agents)]
-            # else:
-            #     quantization_bit = [min(max(2,quantization_bit[id]),24) for id in range(self.num_agents)]
+            quantization_bit = [self.last_quantization_bit[id]+change_per_agent[id][2]* self.step_sizes['q'] for id in range(self.num_agents)]
+            if (self.last_acc[2]) <=0.5:
+                quantization_bit = [min(max(4,quantization_bit[id]),32) for id in range(self.num_agents)]
+            else:
+                quantization_bit = [min(max(2,quantization_bit[id]),32) for id in range(self.num_agents)]
             self.last_quantization_bit = quantization_bit[:]
-            #采样
             for id in range(self.num_agents):
                 samples = np.random.normal(loc=quantization_bit[id], scale=0.15, size=self.args.n_clients)
                 samples =np.round(samples)
@@ -126,12 +138,17 @@ class MultiAgentEnv:
                     samples[samples <= 0] = np.random.normal(loc=quantization_bit[id], scale=0.15, size=np.sum(samples <= 0))
                     samples =np.round(samples)
                 quantization_bit[id] = samples.tolist()
-
-            
-            BW_origin = [self.last_quantization_bit[id] for id in range(self.num_agents)]
-            total = sum(BW_origin)
-            # if total > 30:
-            BW = [np.round(30* (i / total),2) for i in BW_origin]
+            # BW_f = [self.last_BW[id] + change_per_agent[id][3] * self.step_sizes['B'] for id in range(self.num_agents)]
+            # BW_clipped = [min(max(0, b), 30) for b in BW_f]  
+            # total_bw = sum(BW_clipped)
+            # if total_bw > 30: # Max total bandwidth from Table III 
+            #     BW = [np.round(30 * (i / total_bw), 2) for i in BW_clipped]
+            # else:
+            #     BW = BW_clipped
+            # self.last_BW = BW[:]
+            BW = [self.last_quantization_bit[id] for id in range(self.num_agents)]
+            total = sum(BW)
+            BW = [np.round(30* (i / total),2) for i in BW]
 
         quan_schem=[]
         obs_pre = []
@@ -161,39 +178,39 @@ class MultiAgentEnv:
 
             quan_schem.append(quan_bit_avg)
             com_overheads_total += com_overheads
-        self.last_acc = state_acc.copy()
-        self.state = np.concatenate((np.array([fl_iter,com_overheads_total]),quan_schem,BW,state_loss,state_acc))  # 2+4*agent_num =22
+        self.last_acc = state_acc
+        self.state = np.concatenate((np.array([fl_iter,com_overheads_total]),quan_schem,BW,state_loss,state_acc))  # 2+3+3+3+3=14
         
-        self.obs = np.array([np.concatenate((t,quan_schem)) for t in obs_pre])  #shape (agent_num, 9+agent_num)
+        self.obs = np.array([np.concatenate((t,quan_schem)) for t in obs_pre])  #shape (agent_num, 12)
+        # rewards = [] 
+        # for r_id in range(self.num_agents):
+        #     n_r_t = self.last_participating[r_id]
+        #     q_r_t = self.last_quantization_bit[r_id]
+        #     vol_r_t = self.comm_overheads[r_id]  
+        #     sum_nq_others = sum([n * q for n, q in zip(self.last_participating, self.last_quantization_bit)]) - (n_r_t * q_r_t)
+            
+        #     phi_r_t_denominator = 1e-3 * vol_r_t + sum_nq_others
+        #     phi_r_t = (n_r_t * q_r_t) / (phi_r_t_denominator if phi_r_t_denominator > 0 else 1.0)
 
-        #如果state_acc增长，则赋值5
-        delta_acc = np.array([5 if state_acc[id] > self.last_acc[id] else 0 for id in range(self.num_agents)])
+        #     total_reward = 100*state_acc[r_id] + 4.7 * phi_r_t +  -1.2*self.energy_lst[r_id] + -25*self.delay_lst[r_id]
+        #     rewards.append(total_reward)
+
+        # self.last_acc = state_acc.copy()
+        # rewards = np.array(rewards)
+        # rewards = np.clip(rewards, -200, 200)
+
+        # delta_acc = np.array([5 if state_acc[id] > self.last_acc[id] else 0 for id in range(self.num_agents)])
         # rewards = np.add([ac*10+d_ac for ac,d_ac in zip(state_acc,delta_acc)],
         #                         [2.5*num_participating[id]-quan_schem[id] for id in range(self.num_agents)])
-        rewards = []
-        quan_parti = [n * q for n, q in zip(num_participating, quan_schem)]
-        for id in range(self.num_agents):
-            quan_parti_self = quan_parti.copy()
-            quan_parti_self.pop(id)
-            r= state_acc[id]*15 + 32.5*quan_parti[id]/sum(quan_parti_self) + rwd_pre[id]
-            if com_overheads_total > 30:
-                r = r - com_overheads_total/4
-            elif com_overheads_total < 1:
-                r = r - com_overheads_total*15
-            elif com_overheads_total > 15 and com_overheads_total < 30:
-                r = r - com_overheads_total
-            else:
-                r = r - com_overheads_total*5
-            rewards.append(r)
-        rewards = np.array(rewards)
+        rewards = 2.5*rwd_pre
         # rewards = np.add(np.add([ac*20 for ac,ls in zip(state_acc,state_loss)],
         #                         [quan_schem[id]-self.comm_overheads[id]*50 if id !=2 else quan_schem[id]-self.comm_overheads[id]/1.5 for id in range(self.num_agents)]),
         #                         rwd_pre)   # acc_up + (B/B_total * quan_bit_avg*num_clients)/(com_overheads_total) + rwd_pre
-        rewards = np.clip(rewards, -75, 75)
+        # rewards = np.clip(rewards, -75, 75)
         
         done = False
         
-        return np.reshape(rewards,(self.num_agents,1)), done, BW_origin
+        return np.reshape(rewards,(self.num_agents,1)), done
     
     def get_obs(self):
         return self.obs
@@ -221,7 +238,7 @@ class EpisodeRunner:
         self.env.reset()
         self.t = 0
 
-    def run(self, test_mode=False,excel_dir=None):
+    def run(self, test_mode=False):
         # wb = Workbook()
         # ws1 = wb.active
         self.reset()
@@ -235,8 +252,8 @@ class EpisodeRunner:
             state_std = np.std(self.env.get_state())
             obs_mean = np.mean(self.env.get_obs())
             obs_std = np.std(self.env.get_obs())
-            state_norm = (self.env.get_state() - state_mean) / (state_std+1e-8)
-            obs_norm = (self.env.get_obs() - obs_mean) / (obs_std + 1e-8)
+            state_norm = (self.env.get_state() - state_mean) / state_std
+            obs_norm = (self.env.get_obs() - obs_mean) / obs_std
             pre_transition_data = {
                 "state": [state_norm],
                 "obs": [obs_norm],
@@ -253,7 +270,7 @@ class EpisodeRunner:
                     actions_env[..., i+1] = actions_env[..., i+1] * (max_value - min_value) / 2 + (max_value + min_value) / 2
                     actions_env[..., i+1] = torch.clip(actions_env[..., i+1], min_value, max_value)
 
-            reward, terminated,origin_band = self.env.step(actions_env[0])
+            reward, terminated = self.env.step(actions_env[0])
             episode_return += reward
 
             terminated = True if self.t == self.episode_limit else False
@@ -267,9 +284,8 @@ class EpisodeRunner:
             self.batch.update(post_transition_data, ts=self.t)
 
             self.t += 1
-        if test_mode:
-            for server_id in range(self.env.num_agents):
-                self.env.FL_env[server_id].save_metrics_to_excel(excel_dir,origin_band)
+        # for server_id in range(3):
+        #     self.env.FL_env[server_id].save_metrics_to_excel(excel_dir=f'./rsults')
         return self.batch
     
 

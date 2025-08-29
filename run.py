@@ -1,7 +1,6 @@
 import os
 import ssl
 import torch
-import setproctitle
 import torch.multiprocessing as mp
 from control import BasicMac,NoSharedMac
 from env_runner import EpisodeRunner,MultiAgentEnv
@@ -12,8 +11,6 @@ from Learner.Q_learner import Q_Learner
 from Learner.pareto_learner import Pareto_Learner
 from config import fetch_args
 def run_train(args):
-    setproctitle.setproctitle(args.exp_name)
-    args.is_test = args.is_test == 1
     #检查是否存在args.logs_dir文件夹，如果不存在则创建
     if not os.path.exists(args.log_dir):
         os.makedirs(args.log_dir)
@@ -37,7 +34,7 @@ def run_train(args):
     # 加载ReplayBuffer
     # buffer = ReplayBuffer(scheme, groups, args.buffer_size, args.episode_limit + 1, preprocess=preprocess, device="cpu")
     if args.load_replay_buffer:
-        buffer = ReplayBuffer.load(args.replay_buffer_root, scheme, groups, args.episode_limit + 1, preprocess=preprocess,device="cpu")
+        buffer = ReplayBuffer.load("replay_buffer_new.pt", scheme, groups, args.episode_limit + 1, preprocess=preprocess,device="cpu")
     else :
         buffer = ReplayBuffer(scheme, groups, args.buffer_size, args.episode_limit + 1, preprocess=preprocess,device="cpu")
 
@@ -54,36 +51,32 @@ def run_train(args):
     # Learner = PPO_Learner(mac=mac,args=args,scheme=scheme)
     Learner = Pareto_Learner(mac=mac,args=args,scheme=scheme)
     # #导入模型
-    if args.is_test:
-        Learner.load_models(save_model_dir)
+    # Learner.load_models(save_model_dir)
     if args.use_cuda:
         Learner.cuda()
     
     #Run training
     episode = 0
     while episode < 1000:
-        if args.is_test:
-            runner.run(test_mode=True,excel_dir=args.excel_dir) 
-            return 0
-        episode_batch = runner.run()
-        buffer.insert_episode_batch(episode_batch)
-        if episode % 50 == 0 and episode > 0:
-            buffer.save(args.replay_buffer_root)
-        # if buffer.can_sample(args.batch_size):           
-        #     batch_sampled = buffer.sample(args.batch_size)
+        # episode_batch = runner.run(test_mode=False)
+        # return 0
+        # buffer.insert_episode_batch(episode_batch)
+        # # buffer.save("replay_buffer_new819.pt")
+        if buffer.can_sample(args.batch_size):           
+            batch_sampled = buffer.sample(args.batch_size)
 
-        #     # Truncate batch to only filled timesteps
-        #     max_ep_t = batch_sampled.max_t_filled()
-        #     batch_sampled = batch_sampled[:, :max_ep_t]
+            # Truncate batch to only filled timesteps
+            max_ep_t = batch_sampled.max_t_filled()
+            batch_sampled = batch_sampled[:, :max_ep_t]
 
-        #     if batch_sampled.device != 'cuda':
-        #         batch_sampled.to('cuda')
+            if batch_sampled.device != 'cuda':
+                batch_sampled.to('cuda')
             
-        #     Learner.train(batch_sampled)
-        #     Learner.save_models(save_model_dir)
-        #     episode += 1
-        # else:
-        #     continue
+            Learner.train(batch_sampled)
+            Learner.save_models(save_model_dir)
+            episode += 1
+        else:
+            continue
     # buffer.save("replay_buffer.pt")
     #保存模型
     # Learner.save_models(save_model_dir)
@@ -92,10 +85,13 @@ def run_train(args):
 if __name__ == "__main__":
     # Change working directory to script's directory
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+
     ssl._create_default_https_context = ssl._create_unverified_context
     mp.set_start_method('spawn')
-
+    checkpoint_dir = './checkpoint/'
+    figure_dir = './figures/'
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    os.makedirs(figure_dir, exist_ok=True)
+    set_random_seed(127)
     args = fetch_args()
-    
     run_train(args)
